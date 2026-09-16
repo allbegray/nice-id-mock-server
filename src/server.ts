@@ -1,10 +1,11 @@
 import { buildApp } from "./app.ts";
+import { seedDefaultClientIfEmpty } from "./clients.ts";
+import type { Config } from "./config.ts";
 import { loadConfig } from "./config.ts";
 import { closeDb, initDb } from "./db.ts";
-import { seedDefaultClientIfEmpty } from "./clients.ts";
 import { startPurgeTimer } from "./store.ts";
 
-let config;
+let config: Config;
 try {
   config = loadConfig();
 } catch (err) {
@@ -70,7 +71,7 @@ app.addHook("onClose", async () => {
 startPurgeTimer();
 
 let shuttingDown = false;
-function shutdown(signal: string): void {
+function shutdown(): void {
   if (shuttingDown) return;
   shuttingDown = true;
   void app.close().then(
@@ -83,8 +84,8 @@ function shutdown(signal: string): void {
     },
   );
 }
-process.once("SIGTERM", () => shutdown("SIGTERM"));
-process.once("SIGINT", () => shutdown("SIGINT"));
+process.once("SIGTERM", shutdown);
+process.once("SIGINT", shutdown);
 
 try {
   await app.listen({ port: config.port, host: config.host });

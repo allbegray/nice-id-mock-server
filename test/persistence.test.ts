@@ -1,10 +1,10 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { closeDb, getDb, initDb } from "../src/db.ts";
+import { describe, it } from "node:test";
 import { createClient, findClient, listClients, seedDefaultClientIfEmpty } from "../src/clients.ts";
+import { closeDb, getDb, initDb } from "../src/db.ts";
 import {
   createSession,
   isAuthWindowExpired,
@@ -193,7 +193,10 @@ describe("restart persistence", () => {
     const { dir, file } = makeFileDb();
     try {
       initDb(file);
-      assert.equal(seedDefaultClientIfEmpty("seed-client-id", "seed-client-secret", 1700000000000), true);
+      assert.equal(
+        seedDefaultClientIfEmpty("seed-client-id", "seed-client-secret", 1700000000000),
+        true,
+      );
       assert.ok(findClient("seed-client-id") !== undefined);
 
       // Delete-all (keeps meta.seeded_at by design), then restart.
@@ -203,7 +206,10 @@ describe("restart persistence", () => {
       closeDb();
       initDb(file);
 
-      assert.equal(seedDefaultClientIfEmpty("seed-client-id", "seed-client-secret", 1700000000001), false);
+      assert.equal(
+        seedDefaultClientIfEmpty("seed-client-id", "seed-client-secret", 1700000000001),
+        false,
+      );
       assert.deepEqual(listClients(), []);
       assert.equal(findClient("seed-client-id"), undefined);
     } finally {

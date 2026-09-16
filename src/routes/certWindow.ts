@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { readCertHtml } from "../app.ts";
 import { loadConfig } from "../config.ts";
-import { normalizeIdentity, validateIdentity } from "../identity.ts";
 import type { IdentityLike } from "../identity.ts";
+import { normalizeIdentity, validateIdentity } from "../identity.ts";
 import { isAuthWindowExpired, loadByCertId, updateSession } from "../store.ts";
 import type { Identity, Session } from "../types.ts";
 
@@ -143,7 +143,11 @@ function renderTemplate(template: string, vars: Record<string, string>): string 
   return template.replace(/\{\{[A-Z_0-9]+\}\}/g, (token) => vars[token] ?? token);
 }
 
-function formVars(session: Session, values: FormValues, errorMessage?: string): Record<string, string> {
+function formVars(
+  session: Session,
+  values: FormValues,
+  errorMessage?: string,
+): Record<string, string> {
   const errorBox =
     errorMessage === undefined || errorMessage === ""
       ? ""
@@ -221,7 +225,9 @@ async function deliverSuccess(reply: FastifyReply, session: Session): Promise<Fa
   const returnUrl = session.returnUrl ?? "";
   const webTransactionId = session.webTransactionId ?? "";
   if (session.methodType === "POST") {
-    return reply.type("text/html; charset=utf-8").send(postDeliverPage(returnUrl, webTransactionId));
+    return reply
+      .type("text/html; charset=utf-8")
+      .send(postDeliverPage(returnUrl, webTransactionId));
   }
   const url = new URL(returnUrl);
   url.searchParams.append("web_transaction_id", webTransactionId);

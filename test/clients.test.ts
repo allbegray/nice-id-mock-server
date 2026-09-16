@@ -1,17 +1,17 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { getDb } from "../src/db.ts";
+import { describe, it } from "node:test";
 import {
   createClient,
+  deleteClient,
   findClient,
   listClients,
-  updateClientSecret,
-  deleteClient,
-  validateClientCredentials,
-  seedDefaultClientIfEmpty,
   maskSecret,
+  seedDefaultClientIfEmpty,
+  updateClientSecret,
+  validateClientCredentials,
 } from "../src/clients.ts";
-import { initTestDb, closeTestDb } from "./helpers/testDb.ts";
+import { getDb } from "../src/db.ts";
+import { closeTestDb, initTestDb } from "./helpers/testDb.ts";
 
 describe("clients repository", () => {
   it("create -> find returns the same values", () => {
@@ -163,9 +163,9 @@ describe("clients repository", () => {
       assert.equal(seedDefaultClientIfEmpty("other-id", "other-secret", 2000), false);
       assert.equal(findClient("other-id"), undefined);
       // marker row persisted in meta
-      const marker = getDb()
-        .prepare("SELECT value FROM meta WHERE key = ?")
-        .get("seeded_at") as { value: string } | undefined;
+      const marker = getDb().prepare("SELECT value FROM meta WHERE key = ?").get("seeded_at") as
+        | { value: string }
+        | undefined;
       assert.ok(marker);
     } finally {
       closeTestDb();

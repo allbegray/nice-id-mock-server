@@ -1,10 +1,10 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, existsSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { initDb, getDb, closeDb } from "../src/db.ts";
-import { initTestDb, closeTestDb } from "./helpers/testDb.ts";
+import { describe, it } from "node:test";
+import { closeDb, getDb, initDb } from "../src/db.ts";
+import { closeTestDb, initTestDb } from "./helpers/testDb.ts";
 
 describe("db layer", () => {
   it("(4) getDb() before any init throws /not initialized/", () => {
@@ -26,9 +26,7 @@ describe("db layer", () => {
     initTestDb();
     try {
       const rows = getDb()
-        .prepare(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name IN (?,?,?)",
-        )
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN (?,?,?)")
         .all("clients", "sessions", "meta") as { name: string }[];
       const names = rows.map((r) => r.name).sort();
       assert.deepEqual(names, ["clients", "meta", "sessions"]);
@@ -62,9 +60,7 @@ describe("db layer", () => {
     try {
       initDb(dbPath);
       initDb(dbPath);
-      getDb()
-        .prepare("INSERT INTO meta(key, value) VALUES (?, ?)")
-        .run("k", "v");
+      getDb().prepare("INSERT INTO meta(key, value) VALUES (?, ?)").run("k", "v");
     } finally {
       closeDb();
       rmSync(dir, { recursive: true, force: true });

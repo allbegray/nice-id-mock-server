@@ -1,10 +1,10 @@
-import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { buildApp } from "../src/app.ts";
 import { createClient, deleteClient } from "../src/clients.ts";
 import { getDb } from "../src/db.ts";
 import { loadByAccessToken } from "../src/store.ts";
-import { initTestDb, closeTestDb } from "./helpers/testDb.ts";
+import { closeTestDb, initTestDb } from "./helpers/testDb.ts";
 
 // NOTE: there is intentionally no "DB uninitialized" case — session creation
 // itself requires the DB, so the route cannot serve any request without it.

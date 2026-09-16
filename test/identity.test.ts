@@ -1,5 +1,6 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import type { Identity } from "../src/identity.ts";
 import {
   buildResultJson,
   deriveCi,
@@ -9,7 +10,6 @@ import {
   RESULT_JSON_KEYS,
   validateIdentity,
 } from "../src/identity.ts";
-import type { Identity } from "../src/identity.ts";
 
 const BASE: Identity = {
   name: "홍길동",
@@ -26,8 +26,10 @@ const BASE: Identity = {
 //   DI: "nice-mock-di|client-a|홍길동|19000208|1|0"
 // NOTE: the BASE phone number 01012345678 is IRRELEVANT to CI — changing
 // mobileCo/mobileNo must not change CI or DI (see invariance tests below).
-const GOLDEN_CI = "Hs6ptYpxjAIE_IKE71TNhdNVeeQuto1CP672I50xCgdg3w0hKii11fkLwSjBzFG2SSBGMLiyvwQ_UPacA4BAaA";
-const GOLDEN_DI_CLIENT_A = "GAYgeTgo96UO9h322mk65vwqyoDAuCKq0DAlYh-XXog_kUQtshLh2xqqe3LX_G0udfGayN8A-PXhXwEOYZotsg";
+const GOLDEN_CI =
+  "Hs6ptYpxjAIE_IKE71TNhdNVeeQuto1CP672I50xCgdg3w0hKii11fkLwSjBzFG2SSBGMLiyvwQ_UPacA4BAaA";
+const GOLDEN_DI_CLIENT_A =
+  "GAYgeTgo96UO9h322mk65vwqyoDAuCKq0DAlYh-XXog_kUQtshLh2xqqe3LX_G0udfGayN8A-PXhXwEOYZotsg";
 
 describe("identity", () => {
   it("CI/DI are deterministic across calls", () => {
@@ -114,7 +116,12 @@ describe("identity", () => {
   });
 
   it("all presets validate and cover the four required personas", () => {
-    assert.deepEqual(Object.keys(IDENTITY_PRESETS).sort(), ["미성년", "성인남성", "성인여성", "외국인"]);
+    assert.deepEqual(Object.keys(IDENTITY_PRESETS).sort(), [
+      "미성년",
+      "성인남성",
+      "성인여성",
+      "외국인",
+    ]);
     assert.deepEqual(validateIdentity(IDENTITY_PRESETS["성인남성"]), {
       name: "홍길동",
       birthdate: "19000208",

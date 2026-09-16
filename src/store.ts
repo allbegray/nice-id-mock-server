@@ -135,15 +135,6 @@ function rowToSession(row: SessionRow): Session {
   return session;
 }
 
-function copySession(session: Session): Session {
-  return {
-    ...session,
-    svcTypes: session.svcTypes === undefined ? undefined : [...session.svcTypes],
-    expMods: session.expMods === undefined ? undefined : [...session.expMods],
-    identity: session.identity === undefined ? undefined : { ...session.identity },
-  };
-}
-
 export function createSession(requestNo: string, options?: CreateSessionOptions): Session {
   const now = options?.now ?? Date.now();
   const tokenTtlMs = options?.tokenTtlMs ?? DEFAULT_TOKEN_TTL_MS;
@@ -195,25 +186,25 @@ const SELECT_COLUMNS =
   "request_no, client_id, access_token, ticket, iterators, token_expires_at, created_at, cert_id, transaction_id, auth_url_expires_at, return_url, close_url, svc_types, method_type, exp_mods, status, identity, web_transaction_id, fail_code, result_fetched_at";
 
 export function loadByRequestNo(requestNo: string): Session | undefined {
-  const row = getDb().prepare(`SELECT ${SELECT_COLUMNS} FROM sessions WHERE request_no = ?`).get(requestNo) as
-    | SessionRow
-    | undefined;
+  const row = getDb()
+    .prepare(`SELECT ${SELECT_COLUMNS} FROM sessions WHERE request_no = ?`)
+    .get(requestNo) as SessionRow | undefined;
   if (row === undefined) return undefined;
   return rowToSession(row);
 }
 
 export function loadByCertId(certId: string): Session | undefined {
-  const row = getDb().prepare(`SELECT ${SELECT_COLUMNS} FROM sessions WHERE cert_id = ?`).get(certId) as
-    | SessionRow
-    | undefined;
+  const row = getDb()
+    .prepare(`SELECT ${SELECT_COLUMNS} FROM sessions WHERE cert_id = ?`)
+    .get(certId) as SessionRow | undefined;
   if (row === undefined) return undefined;
   return rowToSession(row);
 }
 
 export function loadByAccessToken(accessToken: string): Session | undefined {
-  const row = getDb().prepare(`SELECT ${SELECT_COLUMNS} FROM sessions WHERE access_token = ?`).get(accessToken) as
-    | SessionRow
-    | undefined;
+  const row = getDb()
+    .prepare(`SELECT ${SELECT_COLUMNS} FROM sessions WHERE access_token = ?`)
+    .get(accessToken) as SessionRow | undefined;
   if (row === undefined) return undefined;
   return rowToSession(row);
 }
@@ -268,7 +259,9 @@ export function updateSession(requestNo: string, patch: Partial<Session>): Sessi
     }
   }
   if (assignments.length > 0) {
-    getDb().prepare(`UPDATE sessions SET ${assignments.join(", ")} WHERE request_no = ?`).run(...values, requestNo);
+    getDb()
+      .prepare(`UPDATE sessions SET ${assignments.join(", ")} WHERE request_no = ?`)
+      .run(...values, requestNo);
   }
   return loadByRequestNo(requestNo);
 }

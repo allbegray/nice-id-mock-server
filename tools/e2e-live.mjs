@@ -19,9 +19,9 @@
 // container: the JVM verifier spawns on THIS host (the node:26-alpine
 // image has no JDK).
 
-import { createServer } from "node:http";
-import { randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { createServer } from "node:http";
 
 const MOCK_BASE_URL = process.env["MOCK_BASE_URL"] ?? "http://localhost:8899";
 const CLIENT_ID = process.env["CLIENT_ID"] ?? "test-client-id";
@@ -87,7 +87,12 @@ function startCatcher() {
         parsed.searchParams.forEach((value, key) => {
           query[key] = value;
         });
-        const caught = { method: req.method ?? "GET", url: rawUrl, query, body: Buffer.concat(chunks).toString("utf8") };
+        const caught = {
+          method: req.method ?? "GET",
+          url: rawUrl,
+          query,
+          body: Buffer.concat(chunks).toString("utf8"),
+        };
         captured.push(caught);
         const waiter = waiters.shift();
         if (waiter !== undefined) {
@@ -150,7 +155,9 @@ function startCatcher() {
 }
 
 async function main() {
-  const catcher = await startCatcher().catch((err) => fail(`catcher start failed: ${err?.message ?? err}`));
+  const catcher = await startCatcher().catch((err) =>
+    fail(`catcher start failed: ${err?.message ?? err}`),
+  );
   let catcherClosed = false;
   const closeCatcher = async () => {
     if (!catcherClosed) {
@@ -184,7 +191,9 @@ async function main() {
       "token",
     );
     if (tokenCall.res.status !== 200) {
-      fail(`token: expected HTTP 200, got ${tokenCall.res.status}: ${JSON.stringify(tokenCall.body)}`);
+      fail(
+        `token: expected HTTP 200, got ${tokenCall.res.status}: ${JSON.stringify(tokenCall.body)}`,
+      );
     }
     if (tokenCall.body["result_code"] !== "0000") {
       fail(`token: expected result_code 0000, got ${JSON.stringify(tokenCall.body)}`);
@@ -214,7 +223,9 @@ async function main() {
       "auth/url",
     );
     if (urlCall.res.status !== 200) {
-      fail(`auth/url: expected HTTP 200, got ${urlCall.res.status}: ${JSON.stringify(urlCall.body)}`);
+      fail(
+        `auth/url: expected HTTP 200, got ${urlCall.res.status}: ${JSON.stringify(urlCall.body)}`,
+      );
     }
     if (urlCall.body["result_code"] !== "0000") {
       fail(`auth/url: expected result_code 0000, got ${JSON.stringify(urlCall.body)}`);
@@ -258,10 +269,14 @@ async function main() {
         "auth/result",
       );
       if (resultCall.res.status !== 200) {
-        fail(`auth/result: expected HTTP 200, got ${resultCall.res.status}: ${JSON.stringify(resultCall.body)}`);
+        fail(
+          `auth/result: expected HTTP 200, got ${resultCall.res.status}: ${JSON.stringify(resultCall.body)}`,
+        );
       }
       if (resultCall.body["result_code"] !== FAIL_CODE) {
-        fail(`auth/result: expected result_code ${FAIL_CODE}, got ${JSON.stringify(resultCall.body)}`);
+        fail(
+          `auth/result: expected result_code ${FAIL_CODE}, got ${JSON.stringify(resultCall.body)}`,
+        );
       }
       ok(`fail mode ok (result_code=${FAIL_CODE})`);
       await closeCatcher();
@@ -344,20 +359,31 @@ async function main() {
       "auth/result",
     );
     if (resultCall.res.status !== 200) {
-      fail(`auth/result: expected HTTP 200, got ${resultCall.res.status}: ${JSON.stringify(resultCall.body)}`);
+      fail(
+        `auth/result: expected HTTP 200, got ${resultCall.res.status}: ${JSON.stringify(resultCall.body)}`,
+      );
     }
     if (resultCall.body["result_code"] !== "0000") {
       fail(`auth/result: expected result_code 0000, got ${JSON.stringify(resultCall.body)}`);
     }
     const encData = reqStr(resultCall.body, "enc_data", "auth/result");
     const integrityValue = reqStr(resultCall.body, "integrity_value", "auth/result");
-    console.log(`e2e-live: auth/result body: ${JSON.stringify({ result_code: resultCall.body["result_code"] })}`);
-    ok('auth/result ok (result_code=0000)');
+    console.log(
+      `e2e-live: auth/result body: ${JSON.stringify({ result_code: resultCall.body["result_code"] })}`,
+    );
+    ok("auth/result ok (result_code=0000)");
 
     // 6. Host JVM client decryptor: the compatibility proof.
     const proc = spawnSync(
       "java",
-      ["tools/jvm/ClientDecryptVerify.java", ticket, String(iterators), transactionId, encData, integrityValue],
+      [
+        "tools/jvm/ClientDecryptVerify.java",
+        ticket,
+        String(iterators),
+        transactionId,
+        encData,
+        integrityValue,
+      ],
       { encoding: "utf8", timeout: 120000 },
     );
     if (proc.error) {
@@ -378,9 +404,11 @@ async function main() {
       fail(`JVM verifier: expected name 홍길동, got ${JSON.stringify(parsed?.["name"])}`);
     }
     if (parsed?.["mobile_no"] !== "01012345678") {
-      fail(`JVM verifier: expected mobile_no 01012345678, got ${JSON.stringify(parsed?.["mobile_no"])}`);
+      fail(
+        `JVM verifier: expected mobile_no 01012345678, got ${JSON.stringify(parsed?.["mobile_no"])}`,
+      );
     }
-    ok('JVM decrypt ok (name=홍길동 mobile_no=01012345678)');
+    ok("JVM decrypt ok (name=홍길동 mobile_no=01012345678)");
 
     await closeCatcher();
     console.log(`e2e-live: SUMMARY mode=happy result_code=0000 request_no=${requestNo} PASS`);

@@ -1,8 +1,8 @@
-import { describe, it, beforeEach, afterEach, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import { buildApp } from "../src/app.ts";
 import { createSession, loadByCertId, loadByRequestNo } from "../src/store.ts";
-import { initTestDb, closeTestDb } from "./helpers/testDb.ts";
+import { closeTestDb, initTestDb } from "./helpers/testDb.ts";
 
 const REQUEST_NO = "REQ12345678901234567890";
 const OTHER_REQUEST_NO = "REQ09876543210987654321";
@@ -10,7 +10,7 @@ const OTHER_REQUEST_NO = "REQ09876543210987654321";
 function validBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     request_no: REQUEST_NO,
-    return_url: "https://merchant.example.com/nice-id/return?requestNo=" + REQUEST_NO,
+    return_url: `https://merchant.example.com/nice-id/return?requestNo=${REQUEST_NO}`,
     svc_types: ["M"],
     method_type: "GET",
     exp_mods: [],
@@ -75,7 +75,10 @@ describe("POST /ido/intc/v1.0/auth/url", () => {
       assert.equal(body["result_code"], "0000");
       assert.equal(body["result_message"], "응답성공");
       assert.equal(body["request_no"], REQUEST_NO);
-      assert.match(body["auth_url"] as string, /^http:\/\/localhost:8891\/ido\/cert\/request\/S[0-9a-f-]{36}$/);
+      assert.match(
+        body["auth_url"] as string,
+        /^http:\/\/localhost:8891\/ido\/cert\/request\/S[0-9a-f-]{36}$/,
+      );
       assert.match(body["transaction_id"] as string, /^[A-Za-z0-9_-]{56}$/);
 
       const stored = loadByRequestNo(REQUEST_NO);
@@ -91,10 +94,7 @@ describe("POST /ido/intc/v1.0/auth/url", () => {
         (stored.authUrlExpiresAt ?? 0) >= before + 600000 &&
           (stored.authUrlExpiresAt ?? 0) <= after + 600000,
       );
-      assert.equal(
-        (body["auth_url"] as string).split("/").at(-1),
-        stored.certId,
-      );
+      assert.equal((body["auth_url"] as string).split("/").at(-1), stored.certId);
       assert.equal(loadByCertId(stored.certId ?? "")?.requestNo, REQUEST_NO);
     } finally {
       await app.close();

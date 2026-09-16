@@ -24,9 +24,7 @@ export function initDb(path: string): void {
   db.exec(
     "CREATE TABLE IF NOT EXISTS sessions(request_no TEXT PRIMARY KEY, client_id TEXT NOT NULL, access_token TEXT NOT NULL UNIQUE, ticket TEXT NOT NULL, iterators INTEGER NOT NULL, token_expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL, cert_id TEXT UNIQUE, transaction_id TEXT, auth_url_expires_at INTEGER, return_url TEXT, close_url TEXT, svc_types TEXT, method_type TEXT, exp_mods TEXT, status TEXT NOT NULL CHECK(status IN ('CREATED','PENDING','SUCCESS','FAILED','CANCELLED')), identity TEXT, web_transaction_id TEXT, fail_code TEXT, result_fetched_at INTEGER)",
   );
-  db.exec(
-    "CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)",
-  );
+  db.exec("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)");
   closed = false;
 }
 

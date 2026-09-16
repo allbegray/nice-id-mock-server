@@ -9,7 +9,9 @@ const TRANSACTION_ID = "UzE0MUQyNkFDOEQ3NzYyMDIwMjUxMTEzMTAwMjM3MzM4OTQ5QUMwMkU"
 const ITERATORS = 66;
 const PLAINTEXT_JSON =
   '{"name":"홍길동","birthdate":"19000208","gender":"1","national_info":"0","ci":"CI값","di":"DI값","mobile_co":"2","mobile_no":"01012345678"}';
-const FIXED_IV = Buffer.from([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f]);
+const FIXED_IV = Buffer.from([
+  0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+]);
 
 interface GoldenVectors {
   kdfValue: string;
@@ -46,7 +48,13 @@ test("round-trip: random-IV encrypt then decryptForTest returns input", () => {
 });
 
 test("round-trip: fixed-IV vector decrypts to fixture plaintext", () => {
-  const back = decryptForTest(TICKET, ITERATORS, TRANSACTION_ID, fixture.encData, fixture.integrityValue);
+  const back = decryptForTest(
+    TICKET,
+    ITERATORS,
+    TRANSACTION_ID,
+    fixture.encData,
+    fixture.integrityValue,
+  );
   assert.equal(back, PLAINTEXT_JSON);
 });
 
@@ -67,7 +75,9 @@ test("decryptForTest throws on tampered ciphertext (GCM auth failure)", () => {
   raw[20] ^= 0xff;
   const tamperedEnc = raw.toString("base64url");
   const hmacKey = kdfValue(TICKET, TRANSACTION_ID, ITERATORS).slice(48, 80);
-  const matchingIntegrity = createHmac("sha256", hmacKey).update(tamperedEnc, "utf8").digest("base64url");
+  const matchingIntegrity = createHmac("sha256", hmacKey)
+    .update(tamperedEnc, "utf8")
+    .digest("base64url");
   assert.throws(() => {
     decryptForTest(TICKET, ITERATORS, TRANSACTION_ID, tamperedEnc, matchingIntegrity);
   });

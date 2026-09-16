@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { loadConfig } from "../config.ts";
-import { errorBody, isErrorCode, sendError } from "../errors.ts";
 import { encryptResult } from "../crypto.ts";
+import { errorBody, isErrorCode, sendError } from "../errors.ts";
 import { buildResultJson } from "../identity.ts";
 import {
   isAuthWindowExpired,
@@ -98,7 +98,10 @@ export default async function routes(app: FastifyInstance): Promise<void> {
     // 2. Body: JSON object (or the form-urlencoded fallback registered in
     // app.ts). Anything else -> 3001 (HTTP 200).
     const rawBody: unknown = request.body;
-    if (!isRecord(rawBody) || rawBody === (JSON_PARSE_FAILED as unknown as Record<string, unknown>)) {
+    if (
+      !isRecord(rawBody) ||
+      rawBody === (JSON_PARSE_FAILED as unknown as Record<string, unknown>)
+    ) {
       return reply.code(200).send(errorBody("3001"));
     }
     const body = rawBody as Partial<AuthResultBody> & Record<string, unknown>;

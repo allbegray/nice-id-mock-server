@@ -1,20 +1,20 @@
-import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { buildApp } from "../src/app.ts";
-import { createSession, loadByRequestNo, updateSession } from "../src/store.ts";
-import { initTestDb, closeTestDb } from "./helpers/testDb.ts";
 import { decryptForTest } from "../src/crypto.ts";
 import {
+  deriveCi,
+  deriveDi,
   GENDER_CODES,
   MOBILE_CO_CODES,
   NATIONAL_CODES,
   PRESET_ADULT_MALE,
   RESULT_JSON_KEYS,
-  deriveCi,
-  deriveDi,
 } from "../src/identity.ts";
+import { createSession, loadByRequestNo, updateSession } from "../src/store.ts";
 import type { SessionStatus } from "../src/types.ts";
+import { closeTestDb, initTestDb } from "./helpers/testDb.ts";
 
 const PATH = "/ido/intc/v1.0/auth/result";
 const REQUEST_NO = "REQ12345678901234567890";
@@ -177,10 +177,14 @@ describe("POST /ido/intc/v1.0/auth/result", () => {
           },
         });
         assert.equal(response.statusCode, 200, `status=${status}`);
-        assert.deepEqual(response.json(), {
-          result_code: "3032",
-          result_message: "인증 성공건이 아니거나 유효시간 초과",
-        }, `status=${status}`);
+        assert.deepEqual(
+          response.json(),
+          {
+            result_code: "3032",
+            result_message: "인증 성공건이 아니거나 유효시간 초과",
+          },
+          `status=${status}`,
+        );
       }
     } finally {
       await app.close();

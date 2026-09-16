@@ -1,4 +1,4 @@
-import { initDb, closeDb } from "../../src/db.ts";
+import { closeDb, initDb } from "../../src/db.ts";
 
 export function initTestDb(seed?: () => void): void {
   initDb(":memory:");

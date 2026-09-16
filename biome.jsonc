@@ -1,0 +1,47 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    // 코드(.ts/.mjs)와 손으로 관리하는 JSON만 대상으로 한다.
+    // - package-lock.json: npm이 소유하는 파일이라 건드리지 않는다.
+    // - test/fixtures: tools/jvm/GenGoldenVectors.java 가 한 줄 압축 JSON으로 생성하는 산출물이다.
+    // - README/docs/*.md, src/web/*.html, *.yml: 포매팅 대상에서 제외한다(문서/손작성 마크업).
+    "includes": ["**/*.ts", "**/*.mjs", "**/*.json", "!package-lock.json", "!test/fixtures"]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "complexity": {
+        // 소스 전체가 인덱스 시그니처 접근에 대괄호를 쓰는 관례다 (env["PORT"], body["result_code"]).
+        // Biome의 수정은 unsafe 판정이라 --write 로도 적용되지 않는다.
+        "useLiteralKeys": "off"
+      }
+    }
+  },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "all",
+      "arrowParentheses": "always"
+    }
+  }
+}

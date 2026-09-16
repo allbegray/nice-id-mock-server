@@ -1,5 +1,5 @@
-import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
+import { createServer } from "node:http";
 
 // Captured return_url callback: one HTTP hit against the catcher,
 // whether the mock delivered it as a GET redirect or a POST auto-submit.

@@ -1,9 +1,9 @@
-import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { buildApp } from "../src/app.ts";
 import { createSession, loadByRequestNo, updateSession } from "../src/store.ts";
-import { initTestDb, closeTestDb } from "./helpers/testDb.ts";
+import { closeTestDb, initTestDb } from "./helpers/testDb.ts";
 
 const REQUEST_NO = "REQ12345678901234567890";
 const RETURN_URL = `https://merchant.example.com/nice-id/return?requestNo=${REQUEST_NO}`;
@@ -80,7 +80,10 @@ describe("GET /ido/cert/request/:certId", () => {
   it("unknown certId -> 404 Korean guidance to re-issue via /auth/url", async () => {
     const app = buildApp();
     try {
-      const response = await app.inject({ method: "GET", url: "/ido/cert/request/S00000000-0000-0000-0000-000000000000" });
+      const response = await app.inject({
+        method: "GET",
+        url: "/ido/cert/request/S00000000-0000-0000-0000-000000000000",
+      });
       assert.equal(response.statusCode, 404);
       assert.ok(response.body.includes("다시 발급"), "404 page must guide re-issuance");
       assert.ok(response.body.includes("/auth/url"), "404 page must mention /auth/url");
@@ -105,7 +108,10 @@ describe("GET /ido/cert/request/:certId", () => {
     const app = buildApp();
     try {
       const certId = issuePending();
-      const response = await app.inject({ method: "GET", url: `/ido/cert/request/${certId}?auto=1` });
+      const response = await app.inject({
+        method: "GET",
+        url: `/ido/cert/request/${certId}?auto=1`,
+      });
       assert.equal(response.statusCode, 302);
       const location = response.headers.location ?? "";
       const url = new URL(location);
@@ -125,7 +131,10 @@ describe("GET /ido/cert/request/:certId", () => {
     const app = buildApp();
     try {
       const certId = issuePending("POST");
-      const response = await app.inject({ method: "GET", url: `/ido/cert/request/${certId}?auto=1` });
+      const response = await app.inject({
+        method: "GET",
+        url: `/ido/cert/request/${certId}?auto=1`,
+      });
       assert.equal(response.statusCode, 200);
       assert.ok(response.body.includes(`action="${RETURN_URL}"`));
       assert.ok(response.body.includes('name="web_transaction_id"'));
@@ -177,7 +186,11 @@ describe("POST /ido/cert/request/:certId/complete", () => {
       assert.equal(response.statusCode, 302);
       const location = response.headers.location ?? "";
       const url = new URL(location);
-      assert.equal(url.searchParams.get("requestNo"), REQUEST_NO, "existing requestNo query must be preserved");
+      assert.equal(
+        url.searchParams.get("requestNo"),
+        REQUEST_NO,
+        "existing requestNo query must be preserved",
+      );
       const wtid = url.searchParams.get("web_transaction_id");
       assert.ok(wtid !== null && wtid !== "", "Location must carry web_transaction_id");
       const stored = loadByRequestNo(REQUEST_NO);
@@ -199,8 +212,14 @@ describe("POST /ido/cert/request/:certId/complete", () => {
         payload: validJson(),
       });
       assert.equal(response.statusCode, 200);
-      assert.ok(response.body.includes(`action="${RETURN_URL}"`), "auto-submit form must target return_url");
-      assert.ok(response.body.includes('name="web_transaction_id"'), "auto-submit form must carry hidden field");
+      assert.ok(
+        response.body.includes(`action="${RETURN_URL}"`),
+        "auto-submit form must target return_url",
+      );
+      assert.ok(
+        response.body.includes('name="web_transaction_id"'),
+        "auto-submit form must carry hidden field",
+      );
       assert.ok(response.body.includes("document.forms[0].submit()"));
       const match = /name="web_transaction_id" value="([^"]+)"/.exec(response.body);
       assert.ok(match?.[1] !== undefined && match[1] !== "");
@@ -222,7 +241,10 @@ describe("POST /ido/cert/request/:certId/complete", () => {
         payload: validForm({ mobile_no: "abc" }),
       });
       assert.equal(response.statusCode, 400);
-      assert.ok(response.body.includes("입력 정보를 확인해 주세요"), "400 page must carry a Korean error message");
+      assert.ok(
+        response.body.includes("입력 정보를 확인해 주세요"),
+        "400 page must carry a Korean error message",
+      );
       assert.equal(loadByRequestNo(REQUEST_NO)?.status, "PENDING");
     } finally {
       await app.close();
@@ -311,7 +333,10 @@ describe("POST /ido/cert/request/:certId/cancel", () => {
     const app = buildApp();
     try {
       const certId = issuePending("GET", { closeUrl: CLOSE_URL });
-      const response = await app.inject({ method: "POST", url: `/ido/cert/request/${certId}/cancel` });
+      const response = await app.inject({
+        method: "POST",
+        url: `/ido/cert/request/${certId}/cancel`,
+      });
       assert.equal(response.statusCode, 302);
       assert.equal(response.headers.location, CLOSE_URL);
       assert.equal(loadByRequestNo(REQUEST_NO)?.status, "CANCELLED");
@@ -324,7 +349,10 @@ describe("POST /ido/cert/request/:certId/cancel", () => {
     const app = buildApp();
     try {
       const certId = issuePending();
-      const response = await app.inject({ method: "POST", url: `/ido/cert/request/${certId}/cancel` });
+      const response = await app.inject({
+        method: "POST",
+        url: `/ido/cert/request/${certId}/cancel`,
+      });
       assert.equal(response.statusCode, 200);
       assert.ok(response.body.includes("window.close()"), "close page must attempt window.close()");
       assert.ok(response.body.includes("취소"), "close page must be Korean");

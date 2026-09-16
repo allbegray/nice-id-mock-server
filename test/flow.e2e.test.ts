@@ -1,17 +1,17 @@
-import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.ts";
+import { createClient } from "../src/clients.ts";
 import { loadConfig } from "../src/config.ts";
 import { decryptForTest } from "../src/crypto.ts";
-import { buildResultJson, deriveCi, deriveDi, RESULT_JSON_KEYS } from "../src/identity.ts";
-import { createClient } from "../src/clients.ts";
 import { getDb } from "../src/db.ts";
+import { buildResultJson, deriveCi, deriveDi, RESULT_JSON_KEYS } from "../src/identity.ts";
 import { loadByAccessToken, loadByCertId, loadByRequestNo } from "../src/store.ts";
-import { initTestDb, closeTestDb } from "./helpers/testDb.ts";
-import { startReturnCatcher } from "./helpers/returnCatcher.ts";
 import type { ReturnCatcher } from "./helpers/returnCatcher.ts";
+import { startReturnCatcher } from "./helpers/returnCatcher.ts";
+import { closeTestDb, initTestDb } from "./helpers/testDb.ts";
 
 // Full-flow e2e: every step drives REAL HTTP servers via fetch — a live
 // Fastify app on an ephemeral port plus a local return_url catcher.
@@ -73,7 +73,9 @@ interface TokenIssued {
 
 async function issueToken(baseUrl: string, requestNo: string): Promise<TokenIssued> {
   const config = loadConfig();
-  const basic = Buffer.from(`${config.clientId}:${config.clientSecret}`, "utf8").toString("base64url");
+  const basic = Buffer.from(`${config.clientId}:${config.clientSecret}`, "utf8").toString(
+    "base64url",
+  );
   const res = await fetch(`${baseUrl}/ido/intc/v1.0/auth/token`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Basic ${basic}` },
@@ -83,7 +85,11 @@ async function issueToken(baseUrl: string, requestNo: string): Promise<TokenIssu
   const body = await readJson(res);
   assert.equal(body["result_code"], "0000");
   assert.equal(body["request_no"], requestNo);
-  return { accessToken: reqStr(body, "access_token"), ticket: reqStr(body, "ticket"), iterators: reqNum(body, "iterators") };
+  return {
+    accessToken: reqStr(body, "access_token"),
+    ticket: reqStr(body, "ticket"),
+    iterators: reqNum(body, "iterators"),
+  };
 }
 
 // Explicit-credential issuer: builds the Basic header DIRECTLY from its
@@ -105,7 +111,11 @@ async function issueTokenAs(
   const body = await readJson(res);
   assert.equal(body["result_code"], "0000");
   assert.equal(body["request_no"], requestNo);
-  return { accessToken: reqStr(body, "access_token"), ticket: reqStr(body, "ticket"), iterators: reqNum(body, "iterators") };
+  return {
+    accessToken: reqStr(body, "access_token"),
+    ticket: reqStr(body, "ticket"),
+    iterators: reqNum(body, "iterators"),
+  };
 }
 
 interface UrlIssued {
@@ -224,7 +234,13 @@ async function completeGetFlow(
   const caught = catcher.requests[catcher.requests.length - 1];
   assert.ok(caught !== undefined);
   assert.equal(caught.query["requestNo"] ?? "", requestNo);
-  const result = await callResult(baseUrl, token.accessToken, requestNo, issued.transactionId, webTransactionId);
+  const result = await callResult(
+    baseUrl,
+    token.accessToken,
+    requestNo,
+    issued.transactionId,
+    webTransactionId,
+  );
   assert.equal(result.status, 200);
   assert.equal(result.body["result_code"], "0000");
   const plaintext = decryptForTest(
@@ -278,7 +294,13 @@ async function completeFormFlow(
   assert.equal(caught.query["requestNo"] ?? "", requestNo);
   const caughtBody = new URLSearchParams(caught.body);
   assert.equal(caughtBody.get("web_transaction_id"), webTransactionId);
-  const result = await callResult(baseUrl, token.accessToken, requestNo, issued.transactionId, webTransactionId);
+  const result = await callResult(
+    baseUrl,
+    token.accessToken,
+    requestNo,
+    issued.transactionId,
+    webTransactionId,
+  );
   assert.equal(result.status, 200);
   assert.equal(result.body["result_code"], "0000");
   const plaintext = decryptForTest(
@@ -342,7 +364,13 @@ describe("full-flow e2e with return_url catcher", () => {
       assert.ok(caught !== undefined);
       assert.equal(caught.query["requestNo"] ?? "", requestNo);
 
-      const result = await callResult(baseUrl, token.accessToken, requestNo, issued.transactionId, webTransactionId);
+      const result = await callResult(
+        baseUrl,
+        token.accessToken,
+        requestNo,
+        issued.transactionId,
+        webTransactionId,
+      );
       assert.equal(result.status, 200);
       assert.equal(result.body["result_code"], "0000");
       const plaintext = decryptForTest(
@@ -387,7 +415,10 @@ describe("full-flow e2e with return_url catcher", () => {
       assert.equal(completeRes.status, 200);
       const html = await completeRes.text();
       assert.ok(html.includes(`action="${returnUrl}"`), "auto-submit form must target return_url");
-      assert.ok(html.includes('name="web_transaction_id"'), "auto-submit form must carry hidden field");
+      assert.ok(
+        html.includes('name="web_transaction_id"'),
+        "auto-submit form must carry hidden field",
+      );
       const match = /name="web_transaction_id" value="([^"]+)"/.exec(html);
       assert.ok(match !== null, "auto-submit HTML must embed web_transaction_id");
       const webTransactionId: string = match[1] ?? "";
@@ -407,7 +438,13 @@ describe("full-flow e2e with return_url catcher", () => {
       const caughtBody = new URLSearchParams(caught.body);
       assert.equal(caughtBody.get("web_transaction_id"), webTransactionId);
 
-      const result = await callResult(baseUrl, token.accessToken, requestNo, issued.transactionId, webTransactionId);
+      const result = await callResult(
+        baseUrl,
+        token.accessToken,
+        requestNo,
+        issued.transactionId,
+        webTransactionId,
+      );
       assert.equal(result.status, 200);
       assert.equal(result.body["result_code"], "0000");
       const plaintext = decryptForTest(
@@ -431,7 +468,13 @@ describe("full-flow e2e with return_url catcher", () => {
       const requestNoFail = newRequestNo("REQE2EFAIL");
       const returnUrlFail = `${catcher.baseUrl}/nice-id/return?requestNo=${requestNoFail}`;
       const tokenFail = await issueToken(baseUrl, requestNoFail);
-      const issuedFail = await issueUrl(baseUrl, tokenFail.accessToken, requestNoFail, returnUrlFail, "GET");
+      const issuedFail = await issueUrl(
+        baseUrl,
+        tokenFail.accessToken,
+        requestNoFail,
+        returnUrlFail,
+        "GET",
+      );
 
       const failRes = await fetch(`${issuedFail.authUrl}?auto=1&fail=3032`);
       assert.equal(failRes.status, 200);
@@ -451,7 +494,13 @@ describe("full-flow e2e with return_url catcher", () => {
       const requestNoPending = newRequestNo("REQE2EPEND");
       const returnUrlPending = `${catcher.baseUrl}/nice-id/return?requestNo=${requestNoPending}`;
       const tokenPending = await issueToken(baseUrl, requestNoPending);
-      const issuedPending = await issueUrl(baseUrl, tokenPending.accessToken, requestNoPending, returnUrlPending, "GET");
+      const issuedPending = await issueUrl(
+        baseUrl,
+        tokenPending.accessToken,
+        requestNoPending,
+        returnUrlPending,
+        "GET",
+      );
       const pendingResult = await callResult(
         baseUrl,
         tokenPending.accessToken,
@@ -503,7 +552,13 @@ describe("full-flow e2e with return_url catcher", () => {
       assert.equal(pendingB.body["result_code"], "3032");
 
       // A's own result succeeds and decrypts.
-      const resultA = await callResult(baseUrl, tokenA.accessToken, requestNoA, issuedA.transactionId, webTransactionIdA);
+      const resultA = await callResult(
+        baseUrl,
+        tokenA.accessToken,
+        requestNoA,
+        issuedA.transactionId,
+        webTransactionIdA,
+      );
       assert.equal(resultA.status, 200);
       assert.equal(resultA.body["result_code"], "0000");
       const plaintextA = decryptForTest(
@@ -533,11 +588,20 @@ describe("full-flow e2e with return_url catcher", () => {
       await pageB.text();
       assert.ok(locationB !== null && locationB !== "");
       const webTransactionIdB = await followRedirectToCatcher(locationB, catcher);
-      assert.ok(webTransactionIdB !== webTransactionIdA, "sessions must have distinct web_transaction_ids");
+      assert.ok(
+        webTransactionIdB !== webTransactionIdA,
+        "sessions must have distinct web_transaction_ids",
+      );
       const caughtB = catcher.requests[catcher.requests.length - 1];
       assert.ok(caughtB !== undefined);
       assert.equal(caughtB.query["requestNo"] ?? "", requestNoB);
-      const resultB = await callResult(baseUrl, tokenB.accessToken, requestNoB, issuedB.transactionId, webTransactionIdB);
+      const resultB = await callResult(
+        baseUrl,
+        tokenB.accessToken,
+        requestNoB,
+        issuedB.transactionId,
+        webTransactionIdB,
+      );
       assert.equal(resultB.status, 200);
       assert.equal(resultB.body["result_code"], "0000");
       const plaintextB = decryptForTest(
@@ -571,8 +635,16 @@ describe("full-flow e2e with return_url catcher", () => {
       assertIdentityPayload(runB.plaintext, "client-b");
       const parsedA = JSON.parse(runA.plaintext) as Record<string, unknown>;
       const parsedB = JSON.parse(runB.plaintext) as Record<string, unknown>;
-      assert.equal(reqStr(parsedA, "ci"), reqStr(parsedB, "ci"), "CI is person-scoped: equal across clients");
-      assert.notEqual(reqStr(parsedA, "di"), reqStr(parsedB, "di"), "DI is client-scoped: different per client");
+      assert.equal(
+        reqStr(parsedA, "ci"),
+        reqStr(parsedB, "ci"),
+        "CI is person-scoped: equal across clients",
+      );
+      assert.notEqual(
+        reqStr(parsedA, "di"),
+        reqStr(parsedB, "di"),
+        "DI is client-scoped: different per client",
+      );
 
       // Failure QA: point the second flow at client-a's credentials as well,
       // so both DIs collapse to the same value — the DI-differ assertion MUST
@@ -581,7 +653,11 @@ describe("full-flow e2e with return_url catcher", () => {
       const tokenQ = await issueTokenAs(baseUrl, requestNoQ, "client-a", "client-a-secret");
       const runQ = await completeGetFlow(baseUrl, catcher, requestNoQ, tokenQ);
       const parsedQ = JSON.parse(runQ.plaintext) as Record<string, unknown>;
-      assert.equal(reqStr(parsedA, "di"), reqStr(parsedQ, "di"), "same clientId must yield same DI");
+      assert.equal(
+        reqStr(parsedA, "di"),
+        reqStr(parsedQ, "di"),
+        "same clientId must yield same DI",
+      );
       assert.throws(() => {
         assert.notEqual(reqStr(parsedA, "di"), reqStr(parsedQ, "di"));
       }, "DI-differ assertion must fail when both sides share client-a credentials");
@@ -620,8 +696,16 @@ describe("full-flow e2e with return_url catcher", () => {
         mobile_no: "01087654321",
       });
       const parsed2 = JSON.parse(run2.plaintext) as Record<string, unknown>;
-      assert.equal(reqStr(parsed2, "mobile_co"), "1", "the carrier change must land in the payload");
-      assert.equal(reqStr(parsed2, "mobile_no"), "01087654321", "the phone change must land in the payload");
+      assert.equal(
+        reqStr(parsed2, "mobile_co"),
+        "1",
+        "the carrier change must land in the payload",
+      );
+      assert.equal(
+        reqStr(parsed2, "mobile_no"),
+        "01087654321",
+        "the phone change must land in the payload",
+      );
       assert.equal(reqStr(parsed1, "ci"), reqStr(parsed2, "ci"), "CI ignores phone/carrier");
       assert.equal(reqStr(parsed1, "di"), reqStr(parsed2, "di"), "DI ignores phone/carrier");
       const identity2 = {
@@ -669,13 +753,25 @@ describe("full-flow e2e with return_url catcher", () => {
       const tokenB = await issueTokenAs(baseUrl, requestNo, "client-b", "client-b-secret");
       assert.notEqual(tokenB.accessToken, tokenA.accessToken, "rotation must mint a fresh token");
       // The old token is dead: rotation is DELETE+INSERT.
-      const stale = await callResult(baseUrl, tokenA.accessToken, requestNo, runA.transactionId, runA.webTransactionId);
+      const stale = await callResult(
+        baseUrl,
+        tokenA.accessToken,
+        requestNo,
+        runA.transactionId,
+        runA.webTransactionId,
+      );
       assert.equal(stale.status, 400);
       assert.equal(stale.body["result_code"], "1004");
       // Bare result on the rotated row (no cert completion yet) is 3032, not a DI.
       const returnUrl = `${catcher.baseUrl}/nice-id/return?requestNo=${requestNo}`;
       const issuedB = await issueUrl(baseUrl, tokenB.accessToken, requestNo, returnUrl, "GET");
-      const bare = await callResult(baseUrl, tokenB.accessToken, requestNo, issuedB.transactionId, "not-completed-yet");
+      const bare = await callResult(
+        baseUrl,
+        tokenB.accessToken,
+        requestNo,
+        issuedB.transactionId,
+        "not-completed-yet",
+      );
       assert.equal(bare.status, 200);
       assert.equal(bare.body["result_code"], "3032");
       // Re-run the cert flow from ?auto=1, then compare: DI follows the presenter.
@@ -683,7 +779,11 @@ describe("full-flow e2e with return_url catcher", () => {
       assertIdentityPayload(runB.plaintext, "client-b");
       const parsedB = JSON.parse(runB.plaintext) as Record<string, unknown>;
       assert.equal(reqStr(parsedB, "ci"), ciA, "rotation keeps the person: CI equal");
-      assert.notEqual(reqStr(parsedB, "di"), diA, "rotation adopts presenting clientId: DI differs");
+      assert.notEqual(
+        reqStr(parsedB, "di"),
+        diA,
+        "rotation adopts presenting clientId: DI differs",
+      );
 
       // ② Secret rotation via Admin API: old secret is rejected, new secret keeps DI.
       const putRes = await fetch(`${baseUrl}/admin/clients/client-a`, {
@@ -733,7 +833,13 @@ describe("full-flow e2e with return_url catcher", () => {
       const di = reqStr(first, "di");
 
       // ① Re-fetch /auth/result on the same session: same ci/di.
-      const again = await callResult(baseUrl, token.accessToken, requestNo, run.transactionId, run.webTransactionId);
+      const again = await callResult(
+        baseUrl,
+        token.accessToken,
+        requestNo,
+        run.transactionId,
+        run.webTransactionId,
+      );
       assert.equal(again.status, 200);
       assert.equal(again.body["result_code"], "0000");
       const plaintextAgain = decryptForTest(
@@ -749,7 +855,9 @@ describe("full-flow e2e with return_url catcher", () => {
 
       // ② Legacy row: direct SQL UPDATE of client_id. All 3 loaders reflect
       // it, and buildResultJson over the stored identity matches the live result.
-      getDb().prepare("UPDATE sessions SET client_id = ? WHERE request_no = ?").run("client-b", requestNo);
+      getDb()
+        .prepare("UPDATE sessions SET client_id = ? WHERE request_no = ?")
+        .run("client-b", requestNo);
       const reloaded = loadByRequestNo(requestNo);
       assert.ok(reloaded !== undefined);
       assert.equal(reloaded.clientId, "client-b");
@@ -760,7 +868,13 @@ describe("full-flow e2e with return_url catcher", () => {
       const identity = reloaded.identity;
       assert.ok(identity !== undefined);
       const expected = buildResultJson(identity, "client-b");
-      const after = await callResult(baseUrl, token.accessToken, requestNo, run.transactionId, run.webTransactionId);
+      const after = await callResult(
+        baseUrl,
+        token.accessToken,
+        requestNo,
+        run.transactionId,
+        run.webTransactionId,
+      );
       assert.equal(after.status, 200);
       assert.equal(after.body["result_code"], "0000");
       const plaintextAfter = decryptForTest(

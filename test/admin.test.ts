@@ -1,8 +1,8 @@
-import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.ts";
-import { initTestDb, closeTestDb } from "./helpers/testDb.ts";
+import { closeTestDb, initTestDb } from "./helpers/testDb.ts";
 
 const LIST_PATH = "/admin/clients";
 
@@ -41,7 +41,12 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function asCreated(value: unknown): CreatedClient {
   const body = asRecord(value);
-  assert.deepEqual(Object.keys(body).sort(), ["clientId", "clientSecret", "createdAt", "updatedAt"]);
+  assert.deepEqual(Object.keys(body).sort(), [
+    "clientId",
+    "clientSecret",
+    "createdAt",
+    "updatedAt",
+  ]);
   assert.equal(typeof body["clientId"], "string");
   assert.equal(typeof body["clientSecret"], "string");
   assert.equal(typeof body["createdAt"], "number");
@@ -56,7 +61,12 @@ function asCreated(value: unknown): CreatedClient {
 
 function asMasked(value: unknown): MaskedClient {
   const body = asRecord(value);
-  assert.deepEqual(Object.keys(body).sort(), ["clientId", "clientSecretMasked", "createdAt", "updatedAt"]);
+  assert.deepEqual(Object.keys(body).sort(), [
+    "clientId",
+    "clientSecretMasked",
+    "createdAt",
+    "updatedAt",
+  ]);
   assert.equal(typeof body["clientId"], "string");
   assert.equal(typeof body["clientSecretMasked"], "string");
   assert.equal(typeof body["createdAt"], "number");
@@ -145,7 +155,7 @@ describe("admin client CRUD", () => {
 
       const listAfterDelete = await app.inject({ method: "GET", url: LIST_PATH });
       assert.equal(listAfterDelete.statusCode, 200);
-      assert.deepEqual((asRecord(listAfterDelete.json())["clients"] as unknown[]), []);
+      assert.deepEqual(asRecord(listAfterDelete.json())["clients"] as unknown[], []);
     } finally {
       await app.close();
     }
@@ -246,7 +256,11 @@ describe("admin client CRUD", () => {
   it("POST missing fields -> 400 bad_request", async () => {
     const app = buildApp();
     try {
-      const cases: Record<string, unknown>[] = [{}, { clientId: "only-id" }, { clientSecret: "only-secret-1" }];
+      const cases: Record<string, unknown>[] = [
+        {},
+        { clientId: "only-id" },
+        { clientSecret: "only-secret-1" },
+      ];
       for (const payload of cases) {
         const res = await app.inject({
           method: "POST",
@@ -544,7 +558,10 @@ describe("admin management page", () => {
       ]) {
         assert.ok(html.includes(marker), `missing marker: ${marker}`);
       }
-      assert.ok(html.includes('"/admin/clients"'), "page must call the absolute path /admin/clients");
+      assert.ok(
+        html.includes('"/admin/clients"'),
+        "page must call the absolute path /admin/clients",
+      );
       assert.ok(
         !html.includes('"clients"') && !html.includes("'clients'"),
         "page must not fetch a relative clients path",

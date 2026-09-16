@@ -70,7 +70,9 @@ async function fetchRaw(url, init, step) {
   if (res.status === 204) {
     body = undefined;
   } else {
-    const text = await res.text().catch((err) => fail(step, `read body failed: ${err?.message ?? err}`));
+    const text = await res
+      .text()
+      .catch((err) => fail(step, `read body failed: ${err?.message ?? err}`));
     if (text === "") {
       body = undefined;
     } else {
@@ -143,12 +145,18 @@ async function ensureClient(clientId, secret, step) {
   if (created.status === 409) {
     const updated = await adminSetSecret(clientId, secret, step);
     if (updated.status !== 200) {
-      fail(step, `409-normalize PUT expected HTTP 200, got ${updated.status}: ${JSON.stringify(updated.body)}`);
+      fail(
+        step,
+        `409-normalize PUT expected HTTP 200, got ${updated.status}: ${JSON.stringify(updated.body)}`,
+      );
     }
     ok(`${step}: ${clientId} existed (409), normalized secret via PUT (200)`);
     return;
   }
-  fail(step, `POST expected HTTP 201 or 409, got ${created.status}: ${JSON.stringify(created.body)}`);
+  fail(
+    step,
+    `POST expected HTTP 201 or 409, got ${created.status}: ${JSON.stringify(created.body)}`,
+  );
 }
 
 async function issueToken(clientId, secret, requestNo, step) {
@@ -194,7 +202,10 @@ async function issueAuthUrl(accessToken, requestNo, returnUrl, step) {
     fail(step, `expected result_code 0000, got ${JSON.stringify(call.body)}`);
   }
   if (typeof call.body?.auth_url !== "string" || typeof call.body?.transaction_id !== "string") {
-    fail(step, `expected auth_url/transaction_id strings, got ${JSON.stringify(call.body)?.slice(0, 200)}`);
+    fail(
+      step,
+      `expected auth_url/transaction_id strings, got ${JSON.stringify(call.body)?.slice(0, 200)}`,
+    );
   }
   return call.body;
 }
@@ -212,7 +223,10 @@ async function phase1() {
   // (a) Smoke: full CRUD lifecycle on the throwaway client.
   const deleted = await adminDelete(SMOKE_ID, "phase1-smoke-cleanup");
   if (deleted.status !== 204 && deleted.status !== 404) {
-    fail("phase1-smoke-cleanup", `DELETE expected 204 or 404, got ${deleted.status}: ${JSON.stringify(deleted.body)}`);
+    fail(
+      "phase1-smoke-cleanup",
+      `DELETE expected 204 or 404, got ${deleted.status}: ${JSON.stringify(deleted.body)}`,
+    );
   }
   ok(`phase1: smoke pre-delete ${deleted.status} (204 fresh / 404 ignored)`);
 
@@ -224,16 +238,25 @@ async function phase1() {
     fail("phase1-smoke-list", `list missing ${SMOKE_ID}`);
   }
   if (typeof smokeEntry.clientSecretMasked !== "string" || smokeEntry.clientSecretMasked === "") {
-    fail("phase1-smoke-list", `expected masked secret string, got ${JSON.stringify(smokeEntry)?.slice(0, 200)}`);
+    fail(
+      "phase1-smoke-list",
+      `expected masked secret string, got ${JSON.stringify(smokeEntry)?.slice(0, 200)}`,
+    );
   }
-  if (smokeEntry.clientSecretMasked === SMOKE_SECRET || smokeEntry.clientSecretMasked.includes(SMOKE_SECRET)) {
+  if (
+    smokeEntry.clientSecretMasked === SMOKE_SECRET ||
+    smokeEntry.clientSecretMasked.includes(SMOKE_SECRET)
+  ) {
     fail("phase1-smoke-list", "list leaked the raw secret (expected masked)");
   }
   ok(`phase1: list shows ${SMOKE_ID} masked as ${smokeEntry.clientSecretMasked}`);
 
   const rotated = await adminSetSecret(SMOKE_ID, SMOKE_ROTATED_SECRET, "phase1-smoke-rotate");
   if (rotated.status !== 200) {
-    fail("phase1-smoke-rotate", `PUT expected HTTP 200, got ${rotated.status}: ${JSON.stringify(rotated.body)}`);
+    fail(
+      "phase1-smoke-rotate",
+      `PUT expected HTTP 200, got ${rotated.status}: ${JSON.stringify(rotated.body)}`,
+    );
   }
   ok(`phase1: rotated ${SMOKE_ID} secret via PUT (200)`);
 
@@ -245,13 +268,21 @@ async function phase1() {
   );
   ok("phase1: old secret rejected with 1006");
 
-  const rotatedCall = await issueToken(SMOKE_ID, SMOKE_ROTATED_SECRET, SMOKE_REQ, "phase1-smoke-rotated-secret");
+  const rotatedCall = await issueToken(
+    SMOKE_ID,
+    SMOKE_ROTATED_SECRET,
+    SMOKE_REQ,
+    "phase1-smoke-rotated-secret",
+  );
   expectTokenCode(rotatedCall, 200, "0000", "phase1-smoke-rotated-secret");
   ok(`phase1: rotated secret accepted (0000, token=${mask(rotatedCall.body.access_token)})`);
 
   const removed = await adminDelete(SMOKE_ID, "phase1-smoke-delete");
   if (removed.status !== 204) {
-    fail("phase1-smoke-delete", `DELETE expected HTTP 204, got ${removed.status}: ${JSON.stringify(removed.body)}`);
+    fail(
+      "phase1-smoke-delete",
+      `DELETE expected HTTP 204, got ${removed.status}: ${JSON.stringify(removed.body)}`,
+    );
   }
   ok(`phase1: deleted ${SMOKE_ID} (204)`);
 
@@ -269,11 +300,19 @@ async function phase1() {
   // (b) Persist prep: the client + token that must survive the restart.
   const persistDeleted = await adminDelete(PERSIST_ID, "phase1-persist-cleanup");
   if (persistDeleted.status !== 204 && persistDeleted.status !== 404) {
-    fail("phase1-persist-cleanup", `DELETE expected 204 or 404, got ${persistDeleted.status}: ${JSON.stringify(persistDeleted.body)}`);
+    fail(
+      "phase1-persist-cleanup",
+      `DELETE expected 204 or 404, got ${persistDeleted.status}: ${JSON.stringify(persistDeleted.body)}`,
+    );
   }
   await ensureClient(PERSIST_ID, PERSIST_SECRET, "phase1-persist-create");
 
-  const tokenCall = await issueToken(PERSIST_ID, PERSIST_SECRET, PERSIST_REQ, "phase1-persist-token");
+  const tokenCall = await issueToken(
+    PERSIST_ID,
+    PERSIST_SECRET,
+    PERSIST_REQ,
+    "phase1-persist-token",
+  );
   expectTokenCode(tokenCall, 200, "0000", "phase1-persist-token");
   const accessToken = tokenCall.body?.access_token;
   if (typeof accessToken !== "string" || accessToken === "") {
@@ -282,9 +321,14 @@ async function phase1() {
   // expires_in carries the absolute token-expiry epoch (ms); reuse it as-is.
   const tokenExpiresAt = tokenCall.body?.expires_in;
   if (typeof tokenExpiresAt !== "number" || !Number.isFinite(tokenExpiresAt)) {
-    fail("phase1-persist-token", `expected numeric expires_in, got ${JSON.stringify(tokenExpiresAt)}`);
+    fail(
+      "phase1-persist-token",
+      `expected numeric expires_in, got ${JSON.stringify(tokenExpiresAt)}`,
+    );
   }
-  ok(`phase1: persist token issued (0000, token=${mask(accessToken)}, expiresAt=${tokenExpiresAt})`);
+  ok(
+    `phase1: persist token issued (0000, token=${mask(accessToken)}, expiresAt=${tokenExpiresAt})`,
+  );
 
   const urlBody = await issueAuthUrl(
     accessToken,
@@ -292,7 +336,9 @@ async function phase1() {
     `http://localhost:8080/nice-id/return?requestNo=${PERSIST_REQ}`,
     "phase1-persist-auth-url",
   );
-  ok(`phase1: persist auth_url issued (transaction_id=${String(urlBody.transaction_id).slice(0, 8)}...)`);
+  ok(
+    `phase1: persist auth_url issued (transaction_id=${String(urlBody.transaction_id).slice(0, 8)}...)`,
+  );
 
   const state = {
     accessToken,
@@ -317,8 +363,16 @@ async function phase2() {
     fail("phase2-state-missing", `${STATE_PATH} missing or unparseable (was phase 1 run?)`);
   }
   const { accessToken, requestNo, tokenExpiresAt } = state;
-  if (typeof accessToken !== "string" || accessToken === "" || typeof requestNo !== "string" || typeof tokenExpiresAt !== "number") {
-    fail("phase2-state-missing", `state file has wrong shape: ${JSON.stringify(Object.keys(state ?? {}))}`);
+  if (
+    typeof accessToken !== "string" ||
+    accessToken === "" ||
+    typeof requestNo !== "string" ||
+    typeof tokenExpiresAt !== "number"
+  ) {
+    fail(
+      "phase2-state-missing",
+      `state file has wrong shape: ${JSON.stringify(Object.keys(state ?? {}))}`,
+    );
   }
 
   // TTL margin FIRST: if this trips, check TOKEN_TTL_MS and the compose
@@ -335,7 +389,10 @@ async function phase2() {
   // (a) The persist client survived the compose down/up.
   const clients = await adminList("phase2-client-survived");
   if (!clients.some((entry) => entry?.clientId === PERSIST_ID)) {
-    fail("phase2-client-survived", `list missing ${PERSIST_ID} after restart (is the ./data bind mount intact?)`);
+    fail(
+      "phase2-client-survived",
+      `list missing ${PERSIST_ID} after restart (is the ./data bind mount intact?)`,
+    );
   }
   ok(`phase2: ${PERSIST_ID} present in client list after restart`);
 
@@ -346,12 +403,17 @@ async function phase2() {
     `http://localhost:8080/nice-id/return/phase2?requestNo=${requestNo}`,
     "phase2-auth-url-after-restart",
   );
-  ok(`phase2: stored Bearer valid after restart (0000, transaction_id=${String(urlBody.transaction_id).slice(0, 8)}...)`);
+  ok(
+    `phase2: stored Bearer valid after restart (0000, transaction_id=${String(urlBody.transaction_id).slice(0, 8)}...)`,
+  );
 
   // (c) Cleanup: delete the persist client, then remove the state file.
   const removed = await adminDelete(PERSIST_ID, "phase2-cleanup-delete");
   if (removed.status !== 204) {
-    fail("phase2-cleanup-delete", `DELETE expected HTTP 204, got ${removed.status}: ${JSON.stringify(removed.body)}`);
+    fail(
+      "phase2-cleanup-delete",
+      `DELETE expected HTTP 204, got ${removed.status}: ${JSON.stringify(removed.body)}`,
+    );
   }
   ok(`phase2: deleted ${PERSIST_ID} (204)`);
   try {

@@ -17,10 +17,16 @@ function mapRow(row: ClientRow): Client {
   };
 }
 
-export function createClient(clientId: string, clientSecret: string, now?: number): Client | undefined {
+export function createClient(
+  clientId: string,
+  clientSecret: string,
+  now?: number,
+): Client | undefined {
   const ts = now ?? Date.now();
   const result = getDb()
-    .prepare("INSERT OR IGNORE INTO clients(client_id, client_secret, created_at, updated_at) VALUES (?, ?, ?, ?)")
+    .prepare(
+      "INSERT OR IGNORE INTO clients(client_id, client_secret, created_at, updated_at) VALUES (?, ?, ?, ?)",
+    )
     .run(clientId, clientSecret, ts, ts);
   if (Number(result.changes) === 0) {
     return undefined;
@@ -30,14 +36,18 @@ export function createClient(clientId: string, clientSecret: string, now?: numbe
 
 export function findClient(clientId: string): Client | undefined {
   const row = getDb()
-    .prepare("SELECT client_id, client_secret, created_at, updated_at FROM clients WHERE client_id = ?")
+    .prepare(
+      "SELECT client_id, client_secret, created_at, updated_at FROM clients WHERE client_id = ?",
+    )
     .get(clientId) as ClientRow | undefined;
   return row === undefined ? undefined : mapRow(row);
 }
 
 export function listClients(): Client[] {
   const rows = getDb()
-    .prepare("SELECT client_id, client_secret, created_at, updated_at FROM clients ORDER BY client_id")
+    .prepare(
+      "SELECT client_id, client_secret, created_at, updated_at FROM clients ORDER BY client_id",
+    )
     .all() as unknown as ClientRow[];
   return rows.map(mapRow);
 }
@@ -81,7 +91,11 @@ export function validateClientCredentials(clientId: string, clientSecret: string
 //     authToken, NOT here (do not implement it in this module).
 // (4) Existing tokens stay valid until TTL after client deletion (sessions are
 //     independent rows; enforced by the session layer, not here).
-export function seedDefaultClientIfEmpty(clientId: string, clientSecret: string, now?: number): boolean {
+export function seedDefaultClientIfEmpty(
+  clientId: string,
+  clientSecret: string,
+  now?: number,
+): boolean {
   const marker = getDb().prepare("SELECT value FROM meta WHERE key = ?").get("seeded_at") as
     | { value: string }
     | undefined;
@@ -90,9 +104,13 @@ export function seedDefaultClientIfEmpty(clientId: string, clientSecret: string,
   }
   const ts = now ?? Date.now();
   getDb()
-    .prepare("INSERT OR IGNORE INTO clients(client_id, client_secret, created_at, updated_at) VALUES (?, ?, ?, ?)")
+    .prepare(
+      "INSERT OR IGNORE INTO clients(client_id, client_secret, created_at, updated_at) VALUES (?, ?, ?, ?)",
+    )
     .run(clientId, clientSecret, ts, ts);
-  getDb().prepare("INSERT OR IGNORE INTO meta(key, value) VALUES (?, ?)").run("seeded_at", String(ts));
+  getDb()
+    .prepare("INSERT OR IGNORE INTO meta(key, value) VALUES (?, ?)")
+    .run("seeded_at", String(ts));
   return true;
 }
 

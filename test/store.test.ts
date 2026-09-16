@@ -1,5 +1,7 @@
-import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import { closeDb, getDb, initDb } from "../src/db.ts";
+import { ERROR_CODES, errorBody } from "../src/errors.ts";
 import {
   clearStore,
   createSession,
@@ -13,9 +15,7 @@ import {
   startPurgeTimer,
   updateSession,
 } from "../src/store.ts";
-import { closeDb, getDb, initDb } from "../src/db.ts";
-import { initTestDb, closeTestDb } from "./helpers/testDb.ts";
-import { errorBody, ERROR_CODES } from "../src/errors.ts";
+import { closeTestDb, initTestDb } from "./helpers/testDb.ts";
 
 const REQUEST_NO = "REQ12345678901234567890";
 
@@ -62,9 +62,9 @@ describe("session store", () => {
     // All three loaders resolve the same row (replaces the old Map reads).
     assert.deepEqual(loadByRequestNo(REQUEST_NO)?.accessToken, session.accessToken);
     assert.deepEqual(loadByAccessToken(session.accessToken)?.requestNo, REQUEST_NO);
-    const direct = getDb().prepare("SELECT request_no FROM sessions WHERE request_no = ?").get(REQUEST_NO) as
-      | { request_no: string }
-      | undefined;
+    const direct = getDb()
+      .prepare("SELECT request_no FROM sessions WHERE request_no = ?")
+      .get(REQUEST_NO) as { request_no: string } | undefined;
     assert.equal(direct?.request_no, REQUEST_NO);
   });
 
@@ -72,16 +72,16 @@ describe("session store", () => {
     const now = 1700000000000;
     const session = createSession(REQUEST_NO, { now, clientId: "acme-client" });
     assert.equal(session.clientId, "acme-client");
-    const row = getDb().prepare("SELECT client_id FROM sessions WHERE request_no = ?").get(REQUEST_NO) as
-      | { client_id: string }
-      | undefined;
+    const row = getDb()
+      .prepare("SELECT client_id FROM sessions WHERE request_no = ?")
+      .get(REQUEST_NO) as { client_id: string } | undefined;
     assert.equal(row?.client_id, "acme-client");
 
     const def = createSession("REQ-DEFAULT-CLIENT-00001", { now });
     assert.equal(def.clientId, "test-client-id");
-    const defRow = getDb().prepare("SELECT client_id FROM sessions WHERE request_no = ?").get(
-      "REQ-DEFAULT-CLIENT-00001",
-    ) as { client_id: string } | undefined;
+    const defRow = getDb()
+      .prepare("SELECT client_id FROM sessions WHERE request_no = ?")
+      .get("REQ-DEFAULT-CLIENT-00001") as { client_id: string } | undefined;
     assert.equal(defRow?.client_id, "test-client-id");
   });
 
@@ -267,9 +267,11 @@ describe("session store", () => {
   });
 
   it("clearStore keeps clients; resetAll empties clients but never meta", () => {
-    getDb().prepare(
-      "INSERT INTO clients(client_id, client_secret, created_at, updated_at) VALUES(?, ?, ?, ?)",
-    ).run("seed-client", "seed-secret", 1, 1);
+    getDb()
+      .prepare(
+        "INSERT INTO clients(client_id, client_secret, created_at, updated_at) VALUES(?, ?, ?, ?)",
+      )
+      .run("seed-client", "seed-secret", 1, 1);
     getDb().prepare("INSERT INTO meta(key, value) VALUES(?, ?)").run("seeded_at", "1700000000000");
     makeSession(1700000000000);
 
@@ -289,19 +291,22 @@ describe("session store", () => {
   });
 
   it("error table holds exactly the 12 documented codes", () => {
-    assert.deepEqual([...ERROR_CODES], [
-      "1001",
-      "1002",
-      "1003",
-      "1004",
-      "1006",
-      "1014",
-      "2001",
-      "3001",
-      "3011",
-      "3029",
-      "3032",
-      "3033",
-    ]);
+    assert.deepEqual(
+      [...ERROR_CODES],
+      [
+        "1001",
+        "1002",
+        "1003",
+        "1004",
+        "1006",
+        "1014",
+        "2001",
+        "3001",
+        "3011",
+        "3029",
+        "3032",
+        "3033",
+      ],
+    );
   });
 });

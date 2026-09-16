@@ -34,7 +34,7 @@ function parseBoolEnv(name: string, raw: string | undefined, fallback: boolean):
   throw new Error(`Invalid ${name}=${JSON.stringify(raw)}: expected a boolean (true/false)`);
 }
 
-function parseStringEnv(name: string, raw: string | undefined, fallback: string): string {
+function parseStringEnv(raw: string | undefined, fallback: string): string {
   if (raw === undefined || raw === "") return fallback;
   return raw;
 }
@@ -42,12 +42,12 @@ function parseStringEnv(name: string, raw: string | undefined, fallback: string)
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     port: parseNumberEnv("PORT", env["PORT"], 8899),
-    host: parseStringEnv("HOST", env["HOST"], "0.0.0.0"),
-    publicBaseUrl: parseStringEnv("PUBLIC_BASE_URL", env["PUBLIC_BASE_URL"], "http://localhost:8899"),
+    host: parseStringEnv(env["HOST"], "0.0.0.0"),
+    publicBaseUrl: parseStringEnv(env["PUBLIC_BASE_URL"], "http://localhost:8899"),
     // 최초 시드 값(런타임 고정 아님): first-boot seed only; runtime auth reads the DB.
-    clientId: parseStringEnv("CLIENT_ID", env["CLIENT_ID"], "test-client-id"),
+    clientId: parseStringEnv(env["CLIENT_ID"], "test-client-id"),
     // 최초 시드 값(런타임 고정 아님): first-boot seed only; runtime auth reads the DB.
-    clientSecret: parseStringEnv("CLIENT_SECRET", env["CLIENT_SECRET"], "test-client-secret"),
+    clientSecret: parseStringEnv(env["CLIENT_SECRET"], "test-client-secret"),
     strictCredentials: parseBoolEnv("STRICT_CREDENTIALS", env["STRICT_CREDENTIALS"], true),
     tokenTtlMs: parseNumberEnv("TOKEN_TTL_MS", env["TOKEN_TTL_MS"], 86400000),
     authUrlTtlMs: parseNumberEnv("AUTH_URL_TTL_MS", env["AUTH_URL_TTL_MS"], 600000),
@@ -58,7 +58,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       false,
     ),
     // Relative paths resolve against process cwd. ":memory:" = ephemeral DB.
-    dbPath: parseStringEnv("DB_PATH", env["DB_PATH"], "data/niceid.db"),
+    dbPath: parseStringEnv(env["DB_PATH"], "data/niceid.db"),
     defaultIdentity: {
       name: "홍길동",
       birthdate: "19000208",

@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { readAdminHtml } from "../app.ts";
 import {
   createClient,
   deleteClient,
@@ -8,7 +9,6 @@ import {
   updateClientSecret,
 } from "../clients.ts";
 import type { Client } from "../types.ts";
-import { readAdminHtml } from "../app.ts";
 
 // Runtime client-credential CRUD for the local-only mock tool.
 //
@@ -40,6 +40,7 @@ function isValidClientSecret(value: unknown): value is string {
     typeof value === "string" &&
     value.length >= 1 &&
     value.length <= 128 &&
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: the control-character range IS the check — secrets must not contain whitespace/control chars.
     !/[\s\x00-\x1f\x7f]/.test(value)
   );
 }
@@ -60,7 +61,12 @@ function errorStatusOf(error: unknown): number | undefined {
 
 type AdminError = "bad_request" | "not_found" | "conflict";
 
-function sendAdminError(reply: FastifyReply, status: number, error: AdminError, message: string): FastifyReply {
+function sendAdminError(
+  reply: FastifyReply,
+  status: number,
+  error: AdminError,
+  message: string,
+): FastifyReply {
   return reply.code(status).send({ error, message });
 }
 

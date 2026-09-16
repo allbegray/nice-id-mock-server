@@ -23,9 +23,13 @@ function assertAsciiSafe(ticket: string, transactionId: string): void {
 
 export function kdfValue(ticket: string, transactionId: string, iterators: number): string {
   assertAsciiSafe(ticket, transactionId);
-  return pbkdf2Sync(Buffer.from(ticket, "utf8"), Buffer.from(transactionId, "utf8"), iterators, 64, "sha256").toString(
-    "base64url",
-  );
+  return pbkdf2Sync(
+    Buffer.from(ticket, "utf8"),
+    Buffer.from(transactionId, "utf8"),
+    iterators,
+    64,
+    "sha256",
+  ).toString("base64url");
 }
 
 export function encryptResult(json: string, creds: NiceCredentials, iv?: Buffer): EncryptedResult {
@@ -51,7 +55,9 @@ export function decryptForTest(
   assertAsciiSafe(ticket, transactionId);
   const keyString = kdfValue(ticket, transactionId, iterators);
   const hmacKey = keyString.slice(48, 80);
-  const expectedIntegrity = createHmac("sha256", hmacKey).update(encData, "utf8").digest("base64url");
+  const expectedIntegrity = createHmac("sha256", hmacKey)
+    .update(encData, "utf8")
+    .digest("base64url");
   if (expectedIntegrity !== integrityValue) {
     throw new Error("모듈 내 위변조 데이터 검증에 실패했습니다.");
   }
