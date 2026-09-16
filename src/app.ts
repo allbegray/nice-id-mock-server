@@ -9,6 +9,7 @@ import authTokenRoutes from "./routes/authToken.ts";
 import authUrlRoutes from "./routes/authUrl.ts";
 import authResultRoutes from "./routes/authResult.ts";
 import certWindowRoutes from "./routes/certWindow.ts";
+import adminRoutes from "./routes/admin.ts";
 
 const certHtmlPath = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -50,6 +51,7 @@ export function buildApp(configOverrides?: Partial<Config>): FastifyInstance {
   app.register(authUrlRoutes);
   app.register(authResultRoutes);
   app.register(certWindowRoutes);
+  app.register(adminRoutes);
 
   return app;
 }
