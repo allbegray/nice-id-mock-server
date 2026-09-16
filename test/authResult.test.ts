@@ -11,6 +11,8 @@ import {
   NATIONAL_CODES,
   PRESET_ADULT_MALE,
   RESULT_JSON_KEYS,
+  deriveCi,
+  deriveDi,
 } from "../src/identity.ts";
 import type { SessionStatus } from "../src/types.ts";
 
@@ -129,6 +131,8 @@ describe("POST /ido/intc/v1.0/auth/result", () => {
       assert.equal(parsed["mobile_no"], "01012345678");
       assert.equal((parsed["ci"] as string).length, 86);
       assert.equal((parsed["di"] as string).length, 86);
+      assert.equal(parsed["ci"], deriveCi(PRESET_ADULT_MALE));
+      assert.equal(parsed["di"], deriveDi(PRESET_ADULT_MALE, "test-client-id"));
       assert.ok(GENDER_CODES.includes(parsed["gender"] as string));
       assert.ok(NATIONAL_CODES.includes(parsed["national_info"] as string));
       assert.ok(MOBILE_CO_CODES.includes(parsed["mobile_co"] as string));
@@ -498,6 +502,101 @@ describe("POST /ido/intc/v1.0/auth/result", () => {
       assert.equal(response.statusCode, 200);
       assert.equal((response.json() as Record<string, unknown>)["result_code"], "3029");
     } finally {
+      await app.close();
+    }
+  });
+
+  it("DI is client-scoped: same identity under client-a vs client-b -> CI equal, DI different", async () => {
+    const savedStrictCreds = process.env["STRICT_CREDENTIALS"];
+    const strictCredsWasSet = Object.hasOwn(process.env, "STRICT_CREDENTIALS");
+    process.env["STRICT_CREDENTIALS"] = "true";
+    const app = buildApp();
+    try {
+      const requestNoA = "REQ-CLIENT-A-0123456789";
+      const requestNoB = "REQ-CLIENT-B-0123456789";
+      assert.ok(requestNoA.length >= 20 && requestNoA.length <= 50);
+      assert.ok(requestNoB.length >= 20 && requestNoB.length <= 50);
+      const createdA = createSession(requestNoA, { clientId: "client-a" });
+      const createdB = createSession(requestNoB, { clientId: "client-b" });
+      const transactionIdA = base64urlBytes(42);
+      const transactionIdB = base64urlBytes(42);
+      const webTransactionIdA = base64urlBytes(24);
+      const webTransactionIdB = base64urlBytes(24);
+      const updatedA = updateSession(requestNoA, {
+        transactionId: transactionIdA,
+        webTransactionId: webTransactionIdA,
+        status: "SUCCESS",
+        identity: { ...PRESET_ADULT_MALE },
+      });
+      const updatedB = updateSession(requestNoB, {
+        transactionId: transactionIdB,
+        webTransactionId: webTransactionIdB,
+        status: "SUCCESS",
+        identity: { ...PRESET_ADULT_MALE },
+      });
+      assert.ok(updatedA !== undefined);
+      assert.ok(updatedB !== undefined);
+
+      async function fetchDecrypted(
+        accessToken: string,
+        requestNo: string,
+        transactionId: string,
+        webTransactionId: string,
+        ticket: string,
+        iterators: number,
+      ): Promise<Record<string, unknown>> {
+        const response = await app.inject({
+          method: "POST",
+          url: PATH,
+          headers: { authorization: `Bearer ${accessToken}` },
+          payload: {
+            request_no: requestNo,
+            transaction_id: transactionId,
+            web_transaction_id: webTransactionId,
+          },
+        });
+        assert.equal(response.statusCode, 200, `request_no=${requestNo}`);
+        const body = response.json() as Record<string, unknown>;
+        assert.equal(body["result_code"], "0000", `request_no=${requestNo}`);
+        const plaintext = decryptForTest(
+          ticket,
+          iterators,
+          transactionId,
+          body["enc_data"] as string,
+          body["integrity_value"] as string,
+        );
+        return JSON.parse(plaintext) as Record<string, unknown>;
+      }
+
+      const parsedA = await fetchDecrypted(
+        createdA.accessToken,
+        requestNoA,
+        transactionIdA,
+        webTransactionIdA,
+        updatedA.ticket,
+        updatedA.iterators,
+      );
+      const parsedB = await fetchDecrypted(
+        createdB.accessToken,
+        requestNoB,
+        transactionIdB,
+        webTransactionIdB,
+        updatedB.ticket,
+        updatedB.iterators,
+      );
+
+      assert.equal(parsedA["ci"], deriveCi(PRESET_ADULT_MALE));
+      assert.equal(parsedB["ci"], deriveCi(PRESET_ADULT_MALE));
+      assert.equal(parsedA["di"], deriveDi(PRESET_ADULT_MALE, "client-a"));
+      assert.equal(parsedB["di"], deriveDi(PRESET_ADULT_MALE, "client-b"));
+      assert.equal(parsedA["ci"], parsedB["ci"]);
+      assert.notEqual(parsedA["di"], parsedB["di"]);
+    } finally {
+      if (strictCredsWasSet) {
+        process.env["STRICT_CREDENTIALS"] = savedStrictCreds ?? "";
+      } else {
+        delete process.env["STRICT_CREDENTIALS"];
+      }
       await app.close();
     }
   });

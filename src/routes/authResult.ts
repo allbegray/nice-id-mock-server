@@ -149,7 +149,7 @@ export default async function routes(app: FastifyInstance): Promise<void> {
     if (session.identity === undefined) {
       return sendError(reply, "3032");
     }
-    const json = JSON.stringify(buildResultJson(session.identity));
+    const json = JSON.stringify(buildResultJson(session.identity, session.clientId));
     const { encData, integrityValue } = encryptResult(json, {
       ticket: session.ticket,
       iterators: session.iterators,
