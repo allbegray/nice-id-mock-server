@@ -13,4 +13,8 @@ services:
       - "CLIENT_SECRET=test-client-secret"
       - "ITERATORS=66"
       - "STRICT_ONE_TIME_RESULT=false"
+      - "DB_PATH=/app/data/niceid.db"
+    # NOTE: the ./data bind mount preserves sqlite data across container recreation (down/up).
+    volumes:
+      - ./data:/app/data
     restart: unless-stopped
