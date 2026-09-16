@@ -5,8 +5,10 @@ import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.ts";
 import { loadConfig } from "../src/config.ts";
 import { decryptForTest } from "../src/crypto.ts";
-import { deriveCi, deriveDi, RESULT_JSON_KEYS } from "../src/identity.ts";
+import { buildResultJson, deriveCi, deriveDi, RESULT_JSON_KEYS } from "../src/identity.ts";
 import { createClient } from "../src/clients.ts";
+import { getDb } from "../src/db.ts";
+import { loadByAccessToken, loadByCertId, loadByRequestNo } from "../src/store.ts";
 import { initTestDb, closeTestDb } from "./helpers/testDb.ts";
 import { startReturnCatcher } from "./helpers/returnCatcher.ts";
 import type { ReturnCatcher } from "./helpers/returnCatcher.ts";
@@ -84,6 +86,28 @@ async function issueToken(baseUrl: string, requestNo: string): Promise<TokenIssu
   return { accessToken: reqStr(body, "access_token"), ticket: reqStr(body, "ticket"), iterators: reqNum(body, "iterators") };
 }
 
+// Explicit-credential issuer: builds the Basic header DIRECTLY from its
+// arguments — no defaults, no config fallback. Required for multi-client
+// scenarios where each side presents its own clientId:clientSecret.
+async function issueTokenAs(
+  baseUrl: string,
+  requestNo: string,
+  clientId: string,
+  clientSecret: string,
+): Promise<TokenIssued> {
+  const basic = Buffer.from(`${clientId}:${clientSecret}`, "utf8").toString("base64url");
+  const res = await fetch(`${baseUrl}/ido/intc/v1.0/auth/token`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Basic ${basic}` },
+    body: JSON.stringify({ grant_type: "client_credentials", request_no: requestNo }),
+  });
+  assert.equal(res.status, 200);
+  const body = await readJson(res);
+  assert.equal(body["result_code"], "0000");
+  assert.equal(body["request_no"], requestNo);
+  return { accessToken: reqStr(body, "access_token"), ticket: reqStr(body, "ticket"), iterators: reqNum(body, "iterators") };
+}
+
 interface UrlIssued {
   authUrl: string;
   transactionId: string;
@@ -144,7 +168,7 @@ async function followRedirectToCatcher(location: string, catcher: ReturnCatcher)
   return webTransactionId;
 }
 
-function assertIdentityPayload(plaintext: string): void {
+function assertIdentityPayload(plaintext: string, clientId: string): void {
   const parsed = JSON.parse(plaintext) as Record<string, unknown>;
   assert.deepEqual([...Object.keys(parsed)].sort(), [...RESULT_JSON_KEYS].sort());
   assert.equal(parsed["name"], "홍길동");
@@ -169,7 +193,102 @@ function assertIdentityPayload(plaintext: string): void {
     mobileNo: reqStr(parsed, "mobile_no"),
   };
   assert.equal(deriveCi(identity), ci);
-  assert.equal(deriveDi(identity), di);
+  assert.equal(deriveDi(identity, clientId), di);
+}
+
+interface CompletedFlow {
+  plaintext: string;
+  transactionId: string;
+  webTransactionId: string;
+}
+
+// Full GET cert flow over HTTP: url -> ?auto=1 -> catcher -> result decrypt.
+async function completeGetFlow(
+  baseUrl: string,
+  catcher: ReturnCatcher,
+  requestNo: string,
+  token: TokenIssued,
+): Promise<CompletedFlow> {
+  const returnUrl = `${catcher.baseUrl}/nice-id/return?requestNo=${requestNo}`;
+  const issued = await issueUrl(baseUrl, token.accessToken, requestNo, returnUrl, "GET");
+  assert.ok(
+    issued.authUrl.startsWith(`${baseUrl}/ido/cert/request/S`),
+    "auth_url must point at the live test server",
+  );
+  const pageRes = await fetch(`${issued.authUrl}?auto=1`, { redirect: "manual" });
+  assert.equal(pageRes.status, 302);
+  const location = pageRes.headers.get("location");
+  await pageRes.text();
+  assert.ok(location !== null && location !== "", "302 must carry a Location");
+  const webTransactionId = await followRedirectToCatcher(location, catcher);
+  const caught = catcher.requests[catcher.requests.length - 1];
+  assert.ok(caught !== undefined);
+  assert.equal(caught.query["requestNo"] ?? "", requestNo);
+  const result = await callResult(baseUrl, token.accessToken, requestNo, issued.transactionId, webTransactionId);
+  assert.equal(result.status, 200);
+  assert.equal(result.body["result_code"], "0000");
+  const plaintext = decryptForTest(
+    token.ticket,
+    token.iterators,
+    issued.transactionId,
+    reqStr(result.body, "enc_data"),
+    reqStr(result.body, "integrity_value"),
+  );
+  return { plaintext, transactionId: issued.transactionId, webTransactionId };
+}
+
+// Full POST cert flow over HTTP with caller-supplied form fields:
+// complete -> auto-submit HTML -> catcher POST -> result decrypt.
+async function completeFormFlow(
+  baseUrl: string,
+  catcher: ReturnCatcher,
+  requestNo: string,
+  token: TokenIssued,
+  form: Record<string, string>,
+): Promise<CompletedFlow> {
+  const returnUrl = `${catcher.baseUrl}/nice-id/return?requestNo=${requestNo}`;
+  const issued = await issueUrl(baseUrl, token.accessToken, requestNo, returnUrl, "POST");
+  assert.ok(
+    issued.authUrl.startsWith(`${baseUrl}/ido/cert/request/S`),
+    "auth_url must point at the live test server",
+  );
+  const completeRes = await fetch(`${issued.authUrl}/complete`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(form).toString(),
+  });
+  assert.equal(completeRes.status, 200);
+  const html = await completeRes.text();
+  assert.ok(html.includes(`action="${returnUrl}"`), "auto-submit form must target return_url");
+  assert.ok(html.includes('name="web_transaction_id"'), "auto-submit form must carry hidden field");
+  const match = /name="web_transaction_id" value="([^"]+)"/.exec(html);
+  assert.ok(match !== null, "auto-submit HTML must embed web_transaction_id");
+  const webTransactionId: string = match[1] ?? "";
+  assert.ok(webTransactionId !== "");
+  // Simulate the browser auto-submit: form POST to the catcher.
+  const catcherRes = await fetch(returnUrl, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ web_transaction_id: webTransactionId }).toString(),
+  });
+  assert.equal(catcherRes.status, 200);
+  await catcherRes.text();
+  const caught = await catcher.waitForRequest(WAIT_MS);
+  assert.equal(caught.method, "POST");
+  assert.equal(caught.query["requestNo"] ?? "", requestNo);
+  const caughtBody = new URLSearchParams(caught.body);
+  assert.equal(caughtBody.get("web_transaction_id"), webTransactionId);
+  const result = await callResult(baseUrl, token.accessToken, requestNo, issued.transactionId, webTransactionId);
+  assert.equal(result.status, 200);
+  assert.equal(result.body["result_code"], "0000");
+  const plaintext = decryptForTest(
+    token.ticket,
+    token.iterators,
+    issued.transactionId,
+    reqStr(result.body, "enc_data"),
+    reqStr(result.body, "integrity_value"),
+  );
+  return { plaintext, transactionId: issued.transactionId, webTransactionId };
 }
 
 describe("full-flow e2e with return_url catcher", () => {
@@ -179,6 +298,8 @@ describe("full-flow e2e with return_url catcher", () => {
   beforeEach(() => {
     initTestDb();
     createClient("test-client-id", "test-client-secret");
+    createClient("client-a", "client-a-secret");
+    createClient("client-b", "client-b-secret");
     hadPublicBaseUrl = Object.hasOwn(process.env, "PUBLIC_BASE_URL");
     savedPublicBaseUrl = process.env["PUBLIC_BASE_URL"];
   });
@@ -231,7 +352,7 @@ describe("full-flow e2e with return_url catcher", () => {
         reqStr(result.body, "enc_data"),
         reqStr(result.body, "integrity_value"),
       );
-      assertIdentityPayload(plaintext);
+      assertIdentityPayload(plaintext, "test-client-id");
     } finally {
       await catcher.close();
       await app.close();
@@ -296,7 +417,7 @@ describe("full-flow e2e with return_url catcher", () => {
         reqStr(result.body, "enc_data"),
         reqStr(result.body, "integrity_value"),
       );
-      assertIdentityPayload(plaintext);
+      assertIdentityPayload(plaintext, "test-client-id");
     } finally {
       await catcher.close();
       await app.close();
@@ -392,7 +513,7 @@ describe("full-flow e2e with return_url catcher", () => {
         reqStr(resultA.body, "enc_data"),
         reqStr(resultA.body, "integrity_value"),
       );
-      assertIdentityPayload(plaintextA);
+      assertIdentityPayload(plaintextA, "test-client-id");
 
       // Cross-use: A's web_transaction_id against B's session must fail.
       const cross = await callResult(
@@ -426,7 +547,233 @@ describe("full-flow e2e with return_url catcher", () => {
         reqStr(resultB.body, "enc_data"),
         reqStr(resultB.body, "integrity_value"),
       );
-      assertIdentityPayload(plaintextB);
+      assertIdentityPayload(plaintextB, "test-client-id");
+    } finally {
+      await catcher.close();
+      await app.close();
+    }
+  });
+
+  it("two clients: same person yields equal CI and different DI over HTTP", async () => {
+    // Premise: STRICT_CREDENTIALS=true (default). strict=false DI is undefined.
+    assert.equal(loadConfig().strictCredentials, true);
+    const { app, baseUrl } = await startApp();
+    const catcher = await startReturnCatcher();
+    try {
+      // TWO distinct requestNos, one full flow per client.
+      const requestNoA = newRequestNo("REQE2E2CLIA");
+      const requestNoB = newRequestNo("REQE2E2CLIB");
+      const tokenA = await issueTokenAs(baseUrl, requestNoA, "client-a", "client-a-secret");
+      const runA = await completeGetFlow(baseUrl, catcher, requestNoA, tokenA);
+      const tokenB = await issueTokenAs(baseUrl, requestNoB, "client-b", "client-b-secret");
+      const runB = await completeGetFlow(baseUrl, catcher, requestNoB, tokenB);
+      assertIdentityPayload(runA.plaintext, "client-a");
+      assertIdentityPayload(runB.plaintext, "client-b");
+      const parsedA = JSON.parse(runA.plaintext) as Record<string, unknown>;
+      const parsedB = JSON.parse(runB.plaintext) as Record<string, unknown>;
+      assert.equal(reqStr(parsedA, "ci"), reqStr(parsedB, "ci"), "CI is person-scoped: equal across clients");
+      assert.notEqual(reqStr(parsedA, "di"), reqStr(parsedB, "di"), "DI is client-scoped: different per client");
+
+      // Failure QA: point the second flow at client-a's credentials as well,
+      // so both DIs collapse to the same value — the DI-differ assertion MUST
+      // fail (throws). A fresh requestNo keeps the two main runs untouched.
+      const requestNoQ = newRequestNo("REQE2E2CLIQ");
+      const tokenQ = await issueTokenAs(baseUrl, requestNoQ, "client-a", "client-a-secret");
+      const runQ = await completeGetFlow(baseUrl, catcher, requestNoQ, tokenQ);
+      const parsedQ = JSON.parse(runQ.plaintext) as Record<string, unknown>;
+      assert.equal(reqStr(parsedA, "di"), reqStr(parsedQ, "di"), "same clientId must yield same DI");
+      assert.throws(() => {
+        assert.notEqual(reqStr(parsedA, "di"), reqStr(parsedQ, "di"));
+      }, "DI-differ assertion must fail when both sides share client-a credentials");
+    } finally {
+      await catcher.close();
+      await app.close();
+    }
+  });
+
+  it("same client: phone/carrier change keeps CI and DI, birthdate change alters CI", async () => {
+    // Premise: STRICT_CREDENTIALS=true (default). strict=false DI is undefined.
+    assert.equal(loadConfig().strictCredentials, true);
+    const { app, baseUrl } = await startApp();
+    const catcher = await startReturnCatcher();
+    try {
+      const baseForm = {
+        name: "홍길동",
+        birthdate: "19000208",
+        gender: "1",
+        national_info: "0",
+        mobile_co: "2",
+        mobile_no: "01012345678",
+      };
+      const requestNo1 = newRequestNo("REQE2EPHON1");
+      const token1 = await issueTokenAs(baseUrl, requestNo1, "client-a", "client-a-secret");
+      const run1 = await completeFormFlow(baseUrl, catcher, requestNo1, token1, { ...baseForm });
+      assertIdentityPayload(run1.plaintext, "client-a");
+      const parsed1 = JSON.parse(run1.plaintext) as Record<string, unknown>;
+
+      // Change ONLY phone/carrier (allowlist-valid values), all other fields identical.
+      const requestNo2 = newRequestNo("REQE2EPHON2");
+      const token2 = await issueTokenAs(baseUrl, requestNo2, "client-a", "client-a-secret");
+      const run2 = await completeFormFlow(baseUrl, catcher, requestNo2, token2, {
+        ...baseForm,
+        mobile_co: "1",
+        mobile_no: "01087654321",
+      });
+      const parsed2 = JSON.parse(run2.plaintext) as Record<string, unknown>;
+      assert.equal(reqStr(parsed2, "mobile_co"), "1", "the carrier change must land in the payload");
+      assert.equal(reqStr(parsed2, "mobile_no"), "01087654321", "the phone change must land in the payload");
+      assert.equal(reqStr(parsed1, "ci"), reqStr(parsed2, "ci"), "CI ignores phone/carrier");
+      assert.equal(reqStr(parsed1, "di"), reqStr(parsed2, "di"), "DI ignores phone/carrier");
+      const identity2 = {
+        name: reqStr(parsed2, "name"),
+        birthdate: reqStr(parsed2, "birthdate"),
+        gender: reqStr(parsed2, "gender"),
+        nationalInfo: reqStr(parsed2, "national_info"),
+        mobileCo: reqStr(parsed2, "mobile_co"),
+        mobileNo: reqStr(parsed2, "mobile_no"),
+      };
+      assert.equal(deriveCi(identity2), reqStr(parsed2, "ci"));
+      assert.equal(deriveDi(identity2, "client-a"), reqStr(parsed2, "di"));
+
+      // One birthdate-changed run: CI must differ.
+      const requestNo3 = newRequestNo("REQE2EPHON3");
+      const token3 = await issueTokenAs(baseUrl, requestNo3, "client-a", "client-a-secret");
+      const run3 = await completeFormFlow(baseUrl, catcher, requestNo3, token3, {
+        ...baseForm,
+        birthdate: "19000209",
+      });
+      const parsed3 = JSON.parse(run3.plaintext) as Record<string, unknown>;
+      assert.equal(reqStr(parsed3, "birthdate"), "19000209");
+      assert.notEqual(reqStr(parsed1, "ci"), reqStr(parsed3, "ci"), "CI binds birthdate");
+    } finally {
+      await catcher.close();
+      await app.close();
+    }
+  });
+
+  it("rotation adopts presenting client and secret rotation keeps DI", async () => {
+    // Premise: STRICT_CREDENTIALS=true (default). strict=false DI is undefined.
+    assert.equal(loadConfig().strictCredentials, true);
+    const { app, baseUrl } = await startApp();
+    const catcher = await startReturnCatcher();
+    try {
+      const requestNo = newRequestNo("REQE2EROTA");
+      const tokenA = await issueTokenAs(baseUrl, requestNo, "client-a", "client-a-secret");
+      const runA = await completeGetFlow(baseUrl, catcher, requestNo, tokenA);
+      assertIdentityPayload(runA.plaintext, "client-a");
+      const parsedA = JSON.parse(runA.plaintext) as Record<string, unknown>;
+      const ciA = reqStr(parsedA, "ci");
+      const diA = reqStr(parsedA, "di");
+
+      // ① Rotation: re-issue the SAME request_no with client-b Basic.
+      const tokenB = await issueTokenAs(baseUrl, requestNo, "client-b", "client-b-secret");
+      assert.notEqual(tokenB.accessToken, tokenA.accessToken, "rotation must mint a fresh token");
+      // The old token is dead: rotation is DELETE+INSERT.
+      const stale = await callResult(baseUrl, tokenA.accessToken, requestNo, runA.transactionId, runA.webTransactionId);
+      assert.equal(stale.status, 400);
+      assert.equal(stale.body["result_code"], "1004");
+      // Bare result on the rotated row (no cert completion yet) is 3032, not a DI.
+      const returnUrl = `${catcher.baseUrl}/nice-id/return?requestNo=${requestNo}`;
+      const issuedB = await issueUrl(baseUrl, tokenB.accessToken, requestNo, returnUrl, "GET");
+      const bare = await callResult(baseUrl, tokenB.accessToken, requestNo, issuedB.transactionId, "not-completed-yet");
+      assert.equal(bare.status, 200);
+      assert.equal(bare.body["result_code"], "3032");
+      // Re-run the cert flow from ?auto=1, then compare: DI follows the presenter.
+      const runB = await completeGetFlow(baseUrl, catcher, requestNo, tokenB);
+      assertIdentityPayload(runB.plaintext, "client-b");
+      const parsedB = JSON.parse(runB.plaintext) as Record<string, unknown>;
+      assert.equal(reqStr(parsedB, "ci"), ciA, "rotation keeps the person: CI equal");
+      assert.notEqual(reqStr(parsedB, "di"), diA, "rotation adopts presenting clientId: DI differs");
+
+      // ② Secret rotation via Admin API: old secret is rejected, new secret keeps DI.
+      const putRes = await fetch(`${baseUrl}/admin/clients/client-a`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ clientSecret: "client-a-secret-v2" }),
+      });
+      assert.equal(putRes.status, 200);
+      const putBody = await readJson(putRes);
+      assert.equal(putBody["clientId"], "client-a");
+      const oldBasic = Buffer.from("client-a:client-a-secret", "utf8").toString("base64url");
+      const rejectNo = newRequestNo("REQE2EOLDX");
+      const rejectRes = await fetch(`${baseUrl}/ido/intc/v1.0/auth/token`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Basic ${oldBasic}` },
+        body: JSON.stringify({ grant_type: "client_credentials", request_no: rejectNo }),
+      });
+      assert.equal(rejectRes.status, 400);
+      const rejectBody = await readJson(rejectRes);
+      assert.equal(rejectBody["result_code"], "1006");
+      const requestNoA2 = newRequestNo("REQE2ESECR");
+      const tokenA2 = await issueTokenAs(baseUrl, requestNoA2, "client-a", "client-a-secret-v2");
+      const runA2 = await completeGetFlow(baseUrl, catcher, requestNoA2, tokenA2);
+      assertIdentityPayload(runA2.plaintext, "client-a");
+      const parsedA2 = JSON.parse(runA2.plaintext) as Record<string, unknown>;
+      assert.equal(reqStr(parsedA2, "ci"), ciA, "secret is irrelevant to CI");
+      assert.equal(reqStr(parsedA2, "di"), diA, "secret is irrelevant to DI");
+    } finally {
+      await catcher.close();
+      await app.close();
+    }
+  });
+
+  it("result re-fetch is deterministic and legacy client_id update reflects everywhere", async () => {
+    // Premise: STRICT_CREDENTIALS=true (default); one-time-result gate off.
+    assert.equal(loadConfig().strictCredentials, true);
+    assert.equal(loadConfig().strictOneTimeResult, false);
+    const { app, baseUrl } = await startApp();
+    const catcher = await startReturnCatcher();
+    try {
+      const requestNo = newRequestNo("REQE2EDETE");
+      const token = await issueTokenAs(baseUrl, requestNo, "client-a", "client-a-secret");
+      const run = await completeGetFlow(baseUrl, catcher, requestNo, token);
+      assertIdentityPayload(run.plaintext, "client-a");
+      const first = JSON.parse(run.plaintext) as Record<string, unknown>;
+      const ci = reqStr(first, "ci");
+      const di = reqStr(first, "di");
+
+      // ① Re-fetch /auth/result on the same session: same ci/di.
+      const again = await callResult(baseUrl, token.accessToken, requestNo, run.transactionId, run.webTransactionId);
+      assert.equal(again.status, 200);
+      assert.equal(again.body["result_code"], "0000");
+      const plaintextAgain = decryptForTest(
+        token.ticket,
+        token.iterators,
+        run.transactionId,
+        reqStr(again.body, "enc_data"),
+        reqStr(again.body, "integrity_value"),
+      );
+      const parsedAgain = JSON.parse(plaintextAgain) as Record<string, unknown>;
+      assert.equal(reqStr(parsedAgain, "ci"), ci, "re-fetch keeps CI");
+      assert.equal(reqStr(parsedAgain, "di"), di, "re-fetch keeps DI");
+
+      // ② Legacy row: direct SQL UPDATE of client_id. All 3 loaders reflect
+      // it, and buildResultJson over the stored identity matches the live result.
+      getDb().prepare("UPDATE sessions SET client_id = ? WHERE request_no = ?").run("client-b", requestNo);
+      const reloaded = loadByRequestNo(requestNo);
+      assert.ok(reloaded !== undefined);
+      assert.equal(reloaded.clientId, "client-b");
+      assert.equal(loadByAccessToken(token.accessToken)?.clientId, "client-b");
+      const certId = reloaded.certId;
+      assert.ok(typeof certId === "string" && certId !== "");
+      assert.equal(loadByCertId(certId)?.clientId, "client-b");
+      const identity = reloaded.identity;
+      assert.ok(identity !== undefined);
+      const expected = buildResultJson(identity, "client-b");
+      const after = await callResult(baseUrl, token.accessToken, requestNo, run.transactionId, run.webTransactionId);
+      assert.equal(after.status, 200);
+      assert.equal(after.body["result_code"], "0000");
+      const plaintextAfter = decryptForTest(
+        token.ticket,
+        token.iterators,
+        run.transactionId,
+        reqStr(after.body, "enc_data"),
+        reqStr(after.body, "integrity_value"),
+      );
+      const parsedAfter = JSON.parse(plaintextAfter) as Record<string, unknown>;
+      assert.equal(reqStr(parsedAfter, "ci"), expected.ci);
+      assert.equal(reqStr(parsedAfter, "di"), expected.di);
+      assert.notEqual(reqStr(parsedAfter, "di"), di, "updated row is scoped to client-b now");
     } finally {
       await catcher.close();
       await app.close();
