@@ -75,6 +75,7 @@ docker compose up -d
 
 | 메서드 | 경로 | 인증 | 성공 응답 |
 |---|---|---|---|
+| `GET` | `/` | 없음 | 프로젝트 정보 JSON (`name`, `version`, `description`, `repository`, `docs`, `endpoints`, `defaultIdentity`) |
 | `GET` | `/health` | 없음 | `{"status":"UP"}` |
 | `POST` | `/ido/intc/v1.0/auth/token` | `Basic` (ID:시크릿) | `result_code 0000`, `access_token`, `expires_in`, `token_type`, `iterators`, `ticket` |
 | `POST` | `/ido/intc/v1.0/auth/url` | `Bearer` | `result_code 0000`, `auth_url`, `transaction_id` |
