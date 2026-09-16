@@ -506,3 +506,75 @@ describe("admin client CRUD", () => {
     }
   });
 });
+
+import { readFile, rename } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ADMIN_HTML_PATH = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "src",
+  "web",
+  "admin.html",
+);
+
+describe("admin management page", () => {
+  beforeEach(() => {
+    initTestDb();
+  });
+
+  afterEach(() => {
+    closeTestDb();
+  });
+
+  it("GET /admin -> 200 text/html with all markers and absolute API path", async () => {
+    const app = buildApp();
+    try {
+      const res = await app.inject({ method: "GET", url: "/admin" });
+      assert.equal(res.statusCode, 200);
+      assert.ok(String(res.headers["content-type"]).includes("text/html"));
+      const html = res.body;
+      for (const marker of [
+        'id="warningBanner"',
+        'id="clientList"',
+        'id="createForm"',
+        'id="errorBox"',
+        "/admin/clients",
+      ]) {
+        assert.ok(html.includes(marker), `missing marker: ${marker}`);
+      }
+      assert.ok(html.includes('"/admin/clients"'), "page must call the absolute path /admin/clients");
+      assert.ok(
+        !html.includes('"clients"') && !html.includes("'clients'"),
+        "page must not fetch a relative clients path",
+      );
+      assert.ok(html.includes("prompt("), "edit must use prompt()");
+      assert.ok(html.includes("confirm("), "delete must use confirm()");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("admin.html uses no innerHTML interpolation", async () => {
+    const html = await readFile(ADMIN_HTML_PATH, "utf8");
+    assert.equal(html.split("innerHTML").length - 1, 0);
+  });
+
+  it("GET /admin with missing admin.html -> 500 HTML", async () => {
+    const backupPath = `${ADMIN_HTML_PATH}.test-bak`;
+    await rename(ADMIN_HTML_PATH, backupPath);
+    try {
+      const app = buildApp();
+      try {
+        const res = await app.inject({ method: "GET", url: "/admin" });
+        assert.equal(res.statusCode, 500);
+        assert.ok(String(res.headers["content-type"]).includes("text/html"));
+      } finally {
+        await app.close();
+      }
+    } finally {
+      await rename(backupPath, ADMIN_HTML_PATH);
+    }
+  });
+});

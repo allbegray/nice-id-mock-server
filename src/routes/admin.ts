@@ -8,6 +8,7 @@ import {
   updateClientSecret,
 } from "../clients.ts";
 import type { Client } from "../types.ts";
+import { readAdminHtml } from "../app.ts";
 
 // Runtime client-credential CRUD for the local-only mock tool.
 //
@@ -129,6 +130,17 @@ export default async function routes(app: FastifyInstance): Promise<void> {
   app.get("/admin/clients", async (_request, reply) => {
     const clients = listClients().map(toMasked);
     return reply.code(200).send({ clients });
+  });
+
+  app.get("/admin", async (_request, reply) => {
+    const html = await readAdminHtml();
+    if (html === undefined) {
+      return reply
+        .code(500)
+        .type("text/html; charset=utf-8")
+        .send("<h1>관리 페이지를 찾을 수 없습니다</h1>");
+    }
+    return reply.type("text/html; charset=utf-8").send(html);
   });
 
   app.post("/admin/clients", async (request, reply) => {

@@ -25,6 +25,20 @@ export async function readCertHtml(): Promise<string | undefined> {
   }
 }
 
+const adminHtmlPath = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "web",
+  "admin.html",
+);
+
+export async function readAdminHtml(): Promise<string | undefined> {
+  try {
+    return await readFile(adminHtmlPath, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
 export function buildApp(configOverrides?: Partial<Config>): FastifyInstance {
   const config = { ...loadConfig(), ...configOverrides };
   void config;

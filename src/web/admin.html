@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>클라이언트 관리 (로컬 전용)</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; margin: 0; background: #f2f4f8; color: #222; }
+  .wrap { max-width: 860px; margin: 24px auto; background: #fff; border: 1px solid #d9dee6; border-radius: 12px; padding: 24px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #666; font-size: 13px; margin-bottom: 16px; }
+  #warningBanner { background: #fff7e6; border: 1px solid #f0c36d; color: #7a4d00; border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-bottom: 16px; }
+  #errorBox { border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-bottom: 16px; display: none; word-break: break-all; }
+  #errorBox.show-error { display: block; background: #fdecec; border: 1px solid #f5b5b5; color: #a12020; }
+  #errorBox.show-ok { display: block; background: #ecf8ee; border: 1px solid #a9d8b2; color: #1c6b2a; }
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+  .toolbar button { font-size: 14px; padding: 8px 14px; border: 1px solid #c6cdd8; background: #f7f9fc; border-radius: 8px; cursor: pointer; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 20px; }
+  th, td { border: 1px solid #e3e8f0; padding: 8px 10px; text-align: left; word-break: break-all; }
+  th { background: #f7f9fc; color: #444; }
+  td .rowbtn { font-size: 12px; padding: 4px 10px; margin-right: 4px; border: 1px solid #c6cdd8; background: #fff; border-radius: 6px; cursor: pointer; }
+  fieldset { border: 1px solid #e3e8f0; border-radius: 8px; padding: 14px; margin: 0; }
+  legend { font-size: 14px; font-weight: 700; padding: 0 6px; }
+  label { display: block; font-size: 13px; color: #444; margin: 10px 0 4px; }
+  input[type="text"] { width: 100%; font-size: 15px; padding: 9px 10px; border: 1px solid #c6cdd8; border-radius: 8px; }
+  .actions { margin-top: 14px; }
+  .actions button { background: #1a73e8; color: #fff; border: none; border-radius: 8px; font-size: 15px; padding: 10px 18px; cursor: pointer; }
+  .hint { font-size: 12px; color: #888; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>클라이언트 관리</h1>
+  <div class="sub">로컬 개발용 목 서버의 클라이언트 자격증명을 관리합니다.</div>
+
+  <div id="warningBanner">경고: 이 페이지는 인증이 없으며 로컬 전용입니다. 외부에 노출하지 마세요.</div>
+
+  <div id="errorBox" role="alert"></div>
+
+  <div class="toolbar">
+    <button type="button" id="refreshBtn">새로고침</button>
+  </div>
+
+  <table aria-label="클라이언트 목록">
+    <thead>
+      <tr>
+        <th>clientId</th>
+        <th>마스킹된 시크릿</th>
+        <th>createdAt</th>
+        <th>updatedAt</th>
+        <th>작업</th>
+      </tr>
+    </thead>
+    <tbody id="clientList"></tbody>
+  </table>
+
+  <form id="createForm">
+    <fieldset>
+      <legend>클라이언트 생성</legend>
+      <label for="newClientId">clientId</label>
+      <input type="text" id="newClientId" name="clientId" autocomplete="off">
+      <label for="newClientSecret">clientSecret</label>
+      <input type="text" id="newClientSecret" name="clientSecret" autocomplete="off">
+      <div class="actions">
+        <button type="submit">생성</button>
+      </div>
+      <div class="hint">생성 시에만 전체 시크릿이 한 번 반환됩니다. 목록에서는 마스킹된 값만 표시됩니다.</div>
+    </fieldset>
+  </form>
+</div>
+
+<script>
+(function () {
+  var LIST_API = "/admin/clients";
+
+  function clientApiPath(clientId) {
+    return "/admin/clients/" + encodeURIComponent(clientId);
+  }
+
+  var errorBox = document.getElementById("errorBox");
+  var clientList = document.getElementById("clientList");
+  var createForm = document.getElementById("createForm");
+  var refreshBtn = document.getElementById("refreshBtn");
+  var newClientId = document.getElementById("newClientId");
+  var newClientSecret = document.getElementById("newClientSecret");
+
+  function showMessage(text, kind) {
+    errorBox.textContent = text;
+    if (kind === "ok") {
+      errorBox.className = "show-ok";
+    } else {
+      errorBox.className = "show-error";
+    }
+  }
+
+  function clearMessage() {
+    errorBox.textContent = "";
+    errorBox.className = "";
+  }
+
+  function errorText(status, body) {
+    var detail = "";
+    if (body && typeof body.message === "string" && body.message !== "") {
+      detail = body.message;
+    } else if (body && typeof body.error === "string" && body.error !== "") {
+      detail = body.error;
+    } else {
+      detail = "status " + String(status);
+    }
+    return "요청 실패 (" + String(status) + "): " + detail;
+  }
+
+  function formatTime(value) {
+    if (typeof value !== "number" || !isFinite(value)) return "";
+    try {
+      return new Date(value).toISOString();
+    } catch (e) {
+      return String(value);
+    }
+  }
+
+  function cell(text) {
+    var td = document.createElement("td");
+    td.textContent = text;
+    return td;
+  }
+
+  function actionCell(clientId) {
+    var td = document.createElement("td");
+    var editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "rowbtn";
+    editBtn.textContent = "수정";
+    editBtn.addEventListener("click", function () {
+      onEdit(clientId);
+    });
+    var delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "rowbtn";
+    delBtn.textContent = "삭제";
+    delBtn.addEventListener("click", function () {
+      onDelete(clientId);
+    });
+    td.appendChild(editBtn);
+    td.appendChild(delBtn);
+    return td;
+  }
+
+  function renderList(clients) {
+    while (clientList.firstChild) {
+      clientList.removeChild(clientList.firstChild);
+    }
+    if (!Array.isArray(clients) || clients.length === 0) {
+      var emptyRow = document.createElement("tr");
+      var emptyCell = document.createElement("td");
+      emptyCell.setAttribute("colspan", "5");
+      emptyCell.textContent = "등록된 클라이언트가 없습니다.";
+      emptyRow.appendChild(emptyCell);
+      clientList.appendChild(emptyRow);
+      return;
+    }
+    clients.forEach(function (entry) {
+      var row = document.createElement("tr");
+      var id = typeof entry.clientId === "string" ? entry.clientId : "";
+      var masked = typeof entry.clientSecretMasked === "string" ? entry.clientSecretMasked : "";
+      row.appendChild(cell(id));
+      row.appendChild(cell(masked));
+      row.appendChild(cell(formatTime(entry.createdAt)));
+      row.appendChild(cell(formatTime(entry.updatedAt)));
+      row.appendChild(actionCell(id));
+      clientList.appendChild(row);
+    });
+  }
+
+  function refresh() {
+    clearMessage();
+    fetch(LIST_API, { method: "GET" }).then(function (res) {
+      if (!res.ok) {
+        return res.json().catch(function () { return null; }).then(function (body) {
+          showMessage(errorText(res.status, body), "error");
+        });
+        return;
+      }
+      return res.json().then(function (body) {
+        var clients = body && body.clients ? body.clients : [];
+        renderList(clients);
+      }).catch(function () {
+        showMessage("목록 응답을 해석하지 못했습니다.", "error");
+      });
+    }).catch(function (err) {
+      showMessage("목록 조회 실패: " + String(err && err.message ? err.message : err), "error");
+    });
+  }
+
+  function onCreate(event) {
+    event.preventDefault();
+    clearMessage();
+    var clientId = newClientId.value.trim();
+    var clientSecret = newClientSecret.value;
+    fetch(LIST_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientId: clientId, clientSecret: clientSecret })
+    }).then(function (res) {
+      return res.json().catch(function () { return null; }).then(function (body) {
+        if (!res.ok) {
+          showMessage(errorText(res.status, body), "error");
+          return;
+        }
+        var createdId = body && typeof body.clientId === "string" ? body.clientId : clientId;
+        var createdSecret = body && typeof body.clientSecret === "string" ? body.clientSecret : "";
+        showMessage("생성됨: " + createdId + " / 시크릿(최초 1회만 표시): " + createdSecret, "ok");
+        newClientId.value = "";
+        newClientSecret.value = "";
+        refresh();
+      });
+    }).catch(function (err) {
+      showMessage("생성 실패: " + String(err && err.message ? err.message : err), "error");
+    });
+  }
+
+  function onEdit(clientId) {
+    var next = prompt("새 clientSecret 입력 (" + clientId + ")");
+    if (next === null) return;
+    clearMessage();
+    fetch(clientApiPath(clientId), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientSecret: next })
+    }).then(function (res) {
+      return res.json().catch(function () { return null; }).then(function (body) {
+        if (!res.ok) {
+          showMessage(errorText(res.status, body), "error");
+          return;
+        }
+        showMessage("수정됨: " + clientId, "ok");
+        refresh();
+      });
+    }).catch(function (err) {
+      showMessage("수정 실패: " + String(err && err.message ? err.message : err), "error");
+    });
+  }
+
+  function onDelete(clientId) {
+    if (!confirm("삭제하시겠습니까? (" + clientId + ")")) return;
+    clearMessage();
+    fetch(clientApiPath(clientId), { method: "DELETE" }).then(function (res) {
+      if (!res.ok) {
+        return res.json().catch(function () { return null; }).then(function (body) {
+          showMessage(errorText(res.status, body), "error");
+        });
+        return;
+      }
+      showMessage("삭제됨: " + clientId, "ok");
+      refresh();
+    }).catch(function (err) {
+      showMessage("삭제 실패: " + String(err && err.message ? err.message : err), "error");
+    });
+  }
+
+  createForm.addEventListener("submit", onCreate);
+  refreshBtn.addEventListener("click", refresh);
+  refresh();
+})();
+</script>
+</body>
+</html>
