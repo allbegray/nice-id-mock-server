@@ -52,7 +52,7 @@ export function normalizeIdentity(input: IdentityLike): Identity {
   const mobileCo = pickString(input.mobileCo, input.mobile_co);
   const mobileNo = pickString(input.mobileNo, input.mobile_no);
   return {
-    name: asString(input.name)?.trim() ?? "",
+    name: asString(input.name)?.trim().normalize("NFC") ?? "",
     birthdate: asString(input.birthdate)?.trim() ?? "",
     gender: asString(input.gender)?.trim() ?? "",
     nationalInfo: national?.trim() ?? "",
@@ -144,13 +144,18 @@ function digestBase64UrlNoPad(preimage: string): string {
 
 // Deterministic CI/DI: sha512 over the EXACT preimage template, encoded
 // base64url without padding (64 bytes -> 86 chars).
+// CI binds name+birthdate+gender+nationalInfo only (phone/carrier EXCLUDED
+// so a number change keeps CI stable). DI binds the same fields plus the
+// clientId as the SECOND preimage segment (client-scoped). The `nice-mock-`
+// prefix IS the version marker — no extra salt/version suffix.
+// Mock limitation: a `|` inside `name` is accepted as-is (no escaping).
 export function deriveCi(identity: Identity): string {
-  const preimage = `nice-mock-ci|${identity.name}|${identity.birthdate}|${identity.gender}|${identity.nationalInfo}|${identity.mobileCo}|${identity.mobileNo}`;
+  const preimage = `nice-mock-ci|${identity.name}|${identity.birthdate}|${identity.gender}|${identity.nationalInfo}`;
   return digestBase64UrlNoPad(preimage);
 }
 
-export function deriveDi(identity: Identity): string {
-  const preimage = `nice-mock-di|${identity.name}|${identity.birthdate}|${identity.gender}|${identity.nationalInfo}|${identity.mobileCo}|${identity.mobileNo}`;
+export function deriveDi(identity: Identity, clientId: string): string {
+  const preimage = `nice-mock-di|${clientId}|${identity.name}|${identity.birthdate}|${identity.gender}|${identity.nationalInfo}`;
   return digestBase64UrlNoPad(preimage);
 }
 
@@ -179,7 +184,7 @@ export const RESULT_JSON_KEYS: readonly string[] = [
 // Emit EXACTLY the snake_case result fields. Nullable AuthResultData fields
 // (ci2, ci_update, vnumber, age_code, auth_method) are omitted. The
 // identity is validated first so no code outside the allowlists is emitted.
-export function buildResultJson(identity: Identity): ResultJson {
+export function buildResultJson(identity: Identity, clientId: string): ResultJson {
   const valid = validateIdentity(identity);
   return {
     name: valid.name,
@@ -187,7 +192,7 @@ export function buildResultJson(identity: Identity): ResultJson {
     gender: valid.gender,
     national_info: valid.nationalInfo,
     ci: deriveCi(valid),
-    di: deriveDi(valid),
+    di: deriveDi(valid, clientId),
     mobile_co: valid.mobileCo,
     mobile_no: valid.mobileNo,
   };
