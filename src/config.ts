@@ -11,6 +11,9 @@ export interface Config {
   authUrlTtlMs: number;
   iterators: number;
   strictOneTimeResult: boolean;
+  // SQLite file path. Relative paths resolve against process cwd.
+  // ":memory:" selects an ephemeral in-memory database.
+  dbPath: string;
   defaultIdentity: Identity;
 }
 
@@ -41,7 +44,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     port: parseNumberEnv("PORT", env["PORT"], 8899),
     host: parseStringEnv("HOST", env["HOST"], "0.0.0.0"),
     publicBaseUrl: parseStringEnv("PUBLIC_BASE_URL", env["PUBLIC_BASE_URL"], "http://localhost:8899"),
+    // 최초 시드 값(런타임 고정 아님): first-boot seed only; runtime auth reads the DB.
     clientId: parseStringEnv("CLIENT_ID", env["CLIENT_ID"], "test-client-id"),
+    // 최초 시드 값(런타임 고정 아님): first-boot seed only; runtime auth reads the DB.
     clientSecret: parseStringEnv("CLIENT_SECRET", env["CLIENT_SECRET"], "test-client-secret"),
     strictCredentials: parseBoolEnv("STRICT_CREDENTIALS", env["STRICT_CREDENTIALS"], true),
     tokenTtlMs: parseNumberEnv("TOKEN_TTL_MS", env["TOKEN_TTL_MS"], 86400000),
@@ -52,6 +57,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       env["STRICT_ONE_TIME_RESULT"],
       false,
     ),
+    // Relative paths resolve against process cwd. ":memory:" = ephemeral DB.
+    dbPath: parseStringEnv("DB_PATH", env["DB_PATH"], "data/niceid.db"),
     defaultIdentity: {
       name: "홍길동",
       birthdate: "19000208",
