@@ -351,6 +351,17 @@ class NiceIdReturnSampleController(
 | Linux에서 부팅 시 `SQLITE_CANTOPEN` 또는 `unable to open database file` | `./data` 바인드 마운트 디렉터리의 호스트 권한 문제다. 이미지의 비 root 유저와 호스트 uid가 다르면 DB 파일을 못 만든다 | 먼저 `mkdir -p data` 로 디렉터리를 만든다. 그래도 안 되면 `chmod 777 data` 로 풀거나 compose에 `user:` 오버라이드로 uid를 맞춘다 |
 | 동시 실행 시 DB 잠금/쓰기 충돌 | SQLite는 단일 프로세스 쓰기를 전제한다. 서버 두 개나 컨테이너 두 개가 같은 `data/niceid.db` 를 동시에 쓰면 충돌한다 | 한 번에 하나의 서버/컨테이너만 띄운다. 두 구성이 필요하면 `DB_PATH` 를 서로 다르게 둔다 |
 
+## CI/DI 생성 규칙
+
+`ci`, `di`는 `/auth/result` 조회 시점에 계산한다. 저장하지 않으므로 같은 입력이면 항상 같은 값이 나온다 (`src/identity.ts:141-160`).
+
+- CI 프리이미지: `nice-mock-ci|{name}|{birthdate}|{gender}|{nationalInfo}` (`deriveCi`, `src/identity.ts:152-155`)
+- DI 프리이미지: `nice-mock-di|{clientId}|{name}|{birthdate}|{gender}|{nationalInfo}` (`deriveDi`, `src/identity.ts:157-160`). `clientId`는 토큰 발급 때 세션에 기록된 값이라 사이트마다 DI가 다르다
+- 인코딩: 프리이미지 UTF-8 바이트에 SHA-512, base64url 무패딩. 64바이트라 항상 86자, 결정적 (`digestBase64UrlNoPad`, `src/identity.ts:141-143`)
+- 휴대폰번호·통신사는 CI·DI 프리이미지에 들어가지 않는다. 번호·통신사가 바뀌어도 CI·DI는 그대로다. 이름 안의 `|`는 그대로 합친다 (목 한계)
+- 이 버전에서 규칙이 바뀌어 동일인이어도 CI/DI 값이 이전과 다를 수 있음 — 목 전용
+- 실 NICE의 CI/DI와 무관하다. `test-client-id` 같은 더미로만 확인한다
+
 ## 보안 경고
 
 - 이 mock은 로컬 개발용이다. 외부에 노출하지 않는다. 특히 관리 API(`/admin`, `/admin/clients*`)에는 인증이 전혀 없으므로, `8899` 포트를 외부에 열면 누구나 자격증명을 만들고 바꿀 수 있다. 로컬 루프백에서만 쓴다.
