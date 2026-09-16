@@ -1,4 +1,4 @@
-# NICE 본인인증 목 서버 (nice-id-mock)
+# NICE 본인인증 목 서버 (nice-id-mock-server)
 
 A local mock server for NICE identity verification (token → standard window → encrypted result) so you can develop the full flow without the real NICE service. Node 26 + SQLite persistence.
 
@@ -33,9 +33,9 @@ curl -s http://localhost:8899/health
 
 ```yaml
 services:
-  nice-id-mock:
+  nice-id-mock-server:
     image: allbegray/nice-id-mock-server:v0.1.1
-    container_name: nice-id-mock
+    container_name: nice-id-mock-server
     ports:
       - "127.0.0.1:8899:8899"
     environment:

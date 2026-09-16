@@ -1,8 +1,8 @@
 services:
-  nice-id-mock:
+  nice-id-mock-server:
     build: .
-    image: nice-id-mock:local
-    container_name: nice-id-mock
+    image: nice-id-mock-server:local
+    container_name: nice-id-mock-server
     # NOTE: a PORT override keeps the container healthy (shell-form HEALTHCHECK
     # reads $PORT) but the host mapping below must be changed to match.
     ports:
