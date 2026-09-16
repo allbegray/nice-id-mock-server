@@ -1,8 +1,13 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { buildApp } from "../src/app.ts";
-import { loadByAccessToken, clearStore } from "../src/store.ts";
+import { createClient, deleteClient } from "../src/clients.ts";
+import { getDb } from "../src/db.ts";
+import { loadByAccessToken } from "../src/store.ts";
+import { initTestDb, closeTestDb } from "./helpers/testDb.ts";
 
+// NOTE: there is intentionally no "DB uninitialized" case — session creation
+// itself requires the DB, so the route cannot serve any request without it.
 const PATH = "/ido/intc/v1.0/auth/token";
 const REQUEST_NO = "REQ12345678901234567890";
 const CLIENT_ID = "test-client-id";
@@ -34,13 +39,32 @@ interface TokenSuccess {
   ticket: string;
 }
 
+interface JwtPayload {
+  clientId: string;
+}
+
+function decodeJwtPayload(accessToken: string): JwtPayload {
+  const parts = accessToken.split(".");
+  assert.equal(parts.length, 3);
+  return JSON.parse(Buffer.from(parts[1] as string, "base64url").toString("utf8")) as JwtPayload;
+}
+
+function selectSessionClientId(requestNo: string): string | undefined {
+  const row = getDb()
+    .prepare("SELECT client_id FROM sessions WHERE request_no = ?")
+    .get(requestNo) as { client_id: string } | undefined;
+  return row?.client_id;
+}
+
 describe("POST /ido/intc/v1.0/auth/token", () => {
   beforeEach(() => {
-    clearStore();
+    initTestDb();
+    createClient(CLIENT_ID, CLIENT_SECRET);
   });
 
   afterEach(() => {
     delete process.env["STRICT_CREDENTIALS"];
+    closeTestDb();
   });
 
   it("happy path: returns the exact 0000 field set with valid types", async () => {
@@ -279,6 +303,70 @@ describe("POST /ido/intc/v1.0/auth/token", () => {
       assert.equal(res.statusCode, 200);
       assert.equal((res.json() as { result_code: string }).result_code, "0000");
       assert.equal((res.json() as TokenSuccess).request_no, REQUEST_NO);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("DB-seeded non-default client -> 0000 with presented id in JWT and sessions.client_id", async () => {
+    const presentedId = "presented-client-id";
+    createClient(presentedId, "presented-secret");
+    const app = buildApp();
+    try {
+      const res = await app.inject({
+        method: "POST",
+        url: PATH,
+        headers: {
+          authorization: basicAuth(presentedId, "presented-secret"),
+          "content-type": "application/json",
+        },
+        payload: validPayload(),
+      });
+      assert.equal(res.statusCode, 200);
+      const body = res.json() as TokenSuccess;
+      assert.equal(body.result_code, "0000");
+      assert.equal(decodeJwtPayload(body.access_token).clientId, presentedId);
+      assert.equal(selectSessionClientId(REQUEST_NO), presentedId);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("deleted client -> 400/1006", async () => {
+    assert.equal(deleteClient(CLIENT_ID), true);
+    const app = buildApp();
+    try {
+      const res = await app.inject({
+        method: "POST",
+        url: PATH,
+        headers: validHeaders(),
+        payload: validPayload(),
+      });
+      assert.equal(res.statusCode, 400);
+      assert.equal((res.json() as { result_code: string }).result_code, "1006");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("STRICT_CREDENTIALS=false with empty clients table -> 200/0000", async () => {
+    process.env["STRICT_CREDENTIALS"] = "false";
+    assert.equal(deleteClient(CLIENT_ID), true);
+    const count = getDb().prepare("SELECT COUNT(*) AS n FROM clients").get() as { n: number };
+    assert.equal(count.n, 0);
+    const app = buildApp();
+    try {
+      const res = await app.inject({
+        method: "POST",
+        url: PATH,
+        headers: {
+          authorization: basicAuth("ghost-id", "ghost-secret"),
+          "content-type": "application/json",
+        },
+        payload: validPayload(),
+      });
+      assert.equal(res.statusCode, 200);
+      assert.equal((res.json() as { result_code: string }).result_code, "0000");
     } finally {
       await app.close();
     }

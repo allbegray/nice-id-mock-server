@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { validateClientCredentials } from "../clients.ts";
 import { loadConfig } from "../config.ts";
 import { errorBody, sendError } from "../errors.ts";
 import { createSession } from "../store.ts";
@@ -86,10 +87,8 @@ export default async function routes(app: FastifyInstance): Promise<void> {
     } catch {
       return sendError(reply, "1001");
     }
-    if (
-      config.strictCredentials &&
-      (clientId !== config.clientId || clientSecret !== config.clientSecret)
-    ) {
+    // strict=false skips the DB lookup entirely (local-debug bypass).
+    if (config.strictCredentials && !validateClientCredentials(clientId, clientSecret)) {
       return sendError(reply, "1006");
     }
 
@@ -113,7 +112,7 @@ export default async function routes(app: FastifyInstance): Promise<void> {
     const session = createSession(requestNo, {
       tokenTtlMs: config.tokenTtlMs,
       iterators: config.iterators,
-      clientId: config.clientId,
+      clientId,
     });
 
     return reply.code(200).send({
