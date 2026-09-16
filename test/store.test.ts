@@ -1,4 +1,4 @@
-import { describe, it, beforeEach } from "node:test";
+import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import {
   clearStore,
@@ -9,12 +9,12 @@ import {
   loadByCertId,
   loadByRequestNo,
   purgeExpired,
-  sessionsByAccessToken,
-  sessionsByCertId,
-  sessionsByRequestNo,
+  resetAll,
   startPurgeTimer,
   updateSession,
 } from "../src/store.ts";
+import { closeDb, getDb, initDb } from "../src/db.ts";
+import { initTestDb, closeTestDb } from "./helpers/testDb.ts";
 import { errorBody, ERROR_CODES } from "../src/errors.ts";
 
 const REQUEST_NO = "REQ12345678901234567890";
@@ -23,9 +23,18 @@ function makeSession(now: number, tokenTtlMs = 86400000) {
   return createSession(REQUEST_NO, { now, tokenTtlMs, iterators: 66 });
 }
 
+function countRows(table: string): number {
+  const row = getDb().prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number };
+  return Number(row.n);
+}
+
 describe("session store", () => {
   beforeEach(() => {
-    clearStore();
+    initTestDb();
+  });
+
+  afterEach(() => {
+    closeTestDb();
   });
 
   it("creates a session on three indexes with ticket and JWT-shaped token", () => {
@@ -50,10 +59,30 @@ describe("session store", () => {
     assert.equal(payload["iat"], now);
     assert.equal(payload["exp"], now + 86400000);
 
-    assert.ok(sessionsByRequestNo.has(REQUEST_NO));
-    assert.equal(sessionsByAccessToken.get(session.accessToken), REQUEST_NO);
+    // All three loaders resolve the same row (replaces the old Map reads).
     assert.deepEqual(loadByRequestNo(REQUEST_NO)?.accessToken, session.accessToken);
     assert.deepEqual(loadByAccessToken(session.accessToken)?.requestNo, REQUEST_NO);
+    const direct = getDb().prepare("SELECT request_no FROM sessions WHERE request_no = ?").get(REQUEST_NO) as
+      | { request_no: string }
+      | undefined;
+    assert.equal(direct?.request_no, REQUEST_NO);
+  });
+
+  it("records client_id as write-only audit data (no clientId on Session)", () => {
+    const now = 1700000000000;
+    const session = createSession(REQUEST_NO, { now, clientId: "acme-client" });
+    assert.equal("clientId" in session, false);
+    const row = getDb().prepare("SELECT client_id FROM sessions WHERE request_no = ?").get(REQUEST_NO) as
+      | { client_id: string }
+      | undefined;
+    assert.equal(row?.client_id, "acme-client");
+
+    const def = createSession("REQ-DEFAULT-CLIENT-00001", { now });
+    assert.equal("clientId" in def, false);
+    const defRow = getDb().prepare("SELECT client_id FROM sessions WHERE request_no = ?").get(
+      "REQ-DEFAULT-CLIENT-00001",
+    ) as { client_id: string } | undefined;
+    assert.equal(defRow?.client_id, "test-client-id");
   });
 
   it("token expiry boundary: now >= tokenExpiresAt counts expired", () => {
@@ -70,7 +99,7 @@ describe("session store", () => {
     // Still loadable after expiry (routes decide 1003 vs 1004).
     assert.ok(loadByRequestNo(REQUEST_NO) !== undefined);
     assert.ok(loadByAccessToken(session.accessToken) !== undefined);
-    assert.equal(loadByRequestNo("NO-SUCH-REQUEST") , undefined);
+    assert.equal(loadByRequestNo("NO-SUCH-REQUEST"), undefined);
     // errorBody mapping used by those routes:
     assert.equal(errorBody("1004").result_code, "1004");
     assert.equal(errorBody("1003").result_code, "1003");
@@ -124,6 +153,14 @@ describe("session store", () => {
     assert.deepEqual(loadByAccessToken(second.accessToken)?.requestNo, REQUEST_NO);
   });
 
+  it("rotation via createSession invalidates the stale certId", () => {
+    makeSession(1700000000000);
+    updateSession(REQUEST_NO, { certId: "S-old-cert", status: "PENDING" });
+    assert.ok(loadByCertId("S-old-cert") !== undefined);
+    createSession(REQUEST_NO, { now: 1700000001000 });
+    assert.equal(loadByCertId("S-old-cert"), undefined);
+  });
+
   it("updateSession moves certId and accessToken indexes, dropping stale entries", () => {
     const session = makeSession(1700000000000);
     updateSession(REQUEST_NO, { certId: "S-cert-one", transactionId: "tx-one" });
@@ -138,6 +175,41 @@ describe("session store", () => {
     assert.deepEqual(loadByAccessToken("rotated.token.value")?.requestNo, REQUEST_NO);
   });
 
+  it("updateSession with failCode undefined clears the field (NULL round-trip)", () => {
+    makeSession(1700000000000);
+    updateSession(REQUEST_NO, { failCode: "3032", status: "FAILED" });
+    assert.equal(loadByRequestNo(REQUEST_NO)?.failCode, "3032");
+    updateSession(REQUEST_NO, { failCode: undefined });
+    const reloaded = loadByRequestNo(REQUEST_NO);
+    assert.ok(reloaded !== undefined);
+    assert.equal(reloaded.failCode, undefined);
+    assert.equal("failCode" in reloaded, false);
+  });
+
+  it("round-trips JSON columns (svcTypes, expMods, identity) and NULLs", () => {
+    makeSession(1700000000000);
+    updateSession(REQUEST_NO, {
+      svcTypes: ["M", "U"],
+      expMods: ["a", "b"],
+      identity: {
+        name: "Tester",
+        birthdate: "20000101",
+        gender: "1",
+        nationalInfo: "0",
+        mobileCo: "01",
+        mobileNo: "01000000000",
+      },
+    });
+    const reloaded = loadByRequestNo(REQUEST_NO);
+    assert.deepEqual(reloaded?.svcTypes, ["M", "U"]);
+    assert.deepEqual(reloaded?.expMods, ["a", "b"]);
+    assert.equal(reloaded?.identity?.name, "Tester");
+    assert.equal(reloaded?.identity?.mobileNo, "01000000000");
+    // Untouched optionals stay undefined.
+    assert.equal(reloaded?.returnUrl, undefined);
+    assert.equal(reloaded?.closeUrl, undefined);
+  });
+
   it("updateSession on unknown requestNo returns undefined", () => {
     assert.equal(updateSession("NO-SUCH-REQUEST", { status: "SUCCESS" }), undefined);
   });
@@ -150,6 +222,36 @@ describe("session store", () => {
     const timer = startPurgeTimer(60_000);
     assert.equal(timer.hasRef(), false);
     clearInterval(timer);
+  });
+
+  it("purgeExpired on a closed DB returns 0 instead of throwing", () => {
+    makeSession(1700000000000);
+    closeDb();
+    assert.equal(purgeExpired(), 0);
+    // Re-open for the afterEach closeTestDb() (idempotent close is safe anyway).
+    initDb(":memory:");
+  });
+
+  it("clearStore keeps clients; resetAll empties clients but never meta", () => {
+    getDb().prepare(
+      "INSERT INTO clients(client_id, client_secret, created_at, updated_at) VALUES(?, ?, ?, ?)",
+    ).run("seed-client", "seed-secret", 1, 1);
+    getDb().prepare("INSERT INTO meta(key, value) VALUES(?, ?)").run("seeded_at", "1700000000000");
+    makeSession(1700000000000);
+
+    clearStore();
+    assert.equal(countRows("sessions"), 0);
+    assert.equal(countRows("clients"), 1);
+    assert.equal(countRows("meta"), 1);
+
+    makeSession(1700000001000);
+    resetAll();
+    assert.equal(countRows("sessions"), 0);
+    assert.equal(countRows("clients"), 0);
+    const meta = getDb().prepare("SELECT value FROM meta WHERE key = ?").get("seeded_at") as
+      | { value: string }
+      | undefined;
+    assert.equal(meta?.value, "1700000000000");
   });
 
   it("error table holds exactly the 12 documented codes", () => {

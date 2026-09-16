@@ -1,28 +1,23 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import type { Session } from "./types.ts";
+import { getDb } from "./db.ts";
+import type { Identity, Session, SessionStatus } from "./types.ts";
 
-// In-memory session store for the NICE mock server. No persistence:
-// a restart clears all state by design.
+// SQLite-backed session store for the NICE mock server.
 //
-// Three indexes:
-// - sessionsByRequestNo: request_no -> Session (primary)
-// - sessionsByCertId: certId -> request_no (표준창 lookup)
-// - sessionsByAccessToken: accessToken -> request_no (Bearer validation)
-//
-// Expiry model (mirrors Token.kt `now >= expiresIn`):
-// - Token expiry boundary: `now >= tokenExpiresAt` counts as expired.
-// - Auth-window expiry boundary: `now > authUrlExpiresAt` (strict).
-// - Reads never purge. purgeExpired() removes ONLY token-expired
-//   sessions — NEVER auth-window-expired ones, because routes must still
-//   return 3032 (not 3029) for those. Expired sessions stay in the map
-//   until the 60s sweep so unknown -> 1004 stays distinct from
-//   expired -> 1003.
+// Export names and signatures match the original in-memory store:
+// - Three loaders (by request_no / cert_id / access_token) replace the
+//   three Map indexes. Rotation (re-create under the same request_no)
+//   deletes the old row, so stale tokens/certIds resolve to unknown.
+// - Expiry model (mirrors Token.kt `now >= expiresIn`):
+//   - Token expiry boundary: `now >= tokenExpiresAt` counts as expired.
+//   - Auth-window expiry boundary: `now > authUrlExpiresAt` (strict).
+//   - Reads never purge. purgeExpired() removes ONLY token-expired
+//     sessions — NEVER auth-window-expired ones, because routes must still
+//     return 3032 (not 3029) for those.
+// - `client_id` is write-only audit data: it is stored per row but never
+//   mapped onto the Session return objects.
 
 export const DEFAULT_TOKEN_TTL_MS = 86400000;
-
-export const sessionsByRequestNo = new Map<string, Session>();
-export const sessionsByCertId = new Map<string, string>();
-export const sessionsByAccessToken = new Map<string, string>();
 
 export interface CreateSessionOptions {
   tokenTtlMs?: number;
@@ -59,42 +54,82 @@ function buildAccessToken(
   return `${header}.${payload}.${signature}`;
 }
 
-function removeIndexes(session: Session): void {
-  if (session.certId !== undefined) {
-    if (sessionsByCertId.get(session.certId) === session.requestNo) {
-      sessionsByCertId.delete(session.certId);
-    }
-  }
-  if (sessionsByAccessToken.get(session.accessToken) === session.requestNo) {
-    sessionsByAccessToken.delete(session.accessToken);
-  }
+interface SessionRow {
+  request_no: string;
+  access_token: string;
+  ticket: string;
+  iterators: number;
+  token_expires_at: number;
+  created_at: number;
+  cert_id: string | null;
+  transaction_id: string | null;
+  auth_url_expires_at: number | null;
+  return_url: string | null;
+  close_url: string | null;
+  svc_types: string | null;
+  method_type: string | null;
+  exp_mods: string | null;
+  status: string;
+  identity: string | null;
+  web_transaction_id: string | null;
+  fail_code: string | null;
+  result_fetched_at: number | null;
 }
 
-export function createSession(requestNo: string, options?: CreateSessionOptions): Session {
-  const now = options?.now ?? Date.now();
-  const tokenTtlMs = options?.tokenTtlMs ?? DEFAULT_TOKEN_TTL_MS;
-  const iterators = options?.iterators ?? 66;
-  const clientId = options?.clientId ?? "test-client-id";
-
-  const previous = sessionsByRequestNo.get(requestNo);
-  if (previous !== undefined) {
-    // Rotation: drop stale index entries so the old token/certId resolve
-    // to unknown (1004 / 404) instead of the rotated session.
-    removeIndexes(previous);
+function parseStringArrayColumn(column: string, raw: string | null): string[] | undefined {
+  if (raw === null) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch (error) {
+    throw new Error(`store: corrupt ${column} JSON for session row: ${(error as Error).message}`);
   }
+  if (!Array.isArray(parsed)) {
+    throw new Error(`store: corrupt ${column} JSON for session row: expected array`);
+  }
+  return [...(parsed as string[])];
+}
 
+function parseIdentityColumn(raw: string | null): Identity | undefined {
+  if (raw === null) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch (error) {
+    throw new Error(`store: corrupt identity JSON for session row: ${(error as Error).message}`);
+  }
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new Error("store: corrupt identity JSON for session row: expected object");
+  }
+  return { ...(parsed as Identity) };
+}
+
+function rowToSession(row: SessionRow): Session {
   const session: Session = {
-    requestNo,
-    accessToken: buildAccessToken(requestNo, now, tokenTtlMs, clientId, iterators),
-    tokenExpiresAt: now + tokenTtlMs,
-    ticket: randomBytes(42).toString("base64url"),
-    iterators,
-    createdAt: now,
-    status: "CREATED",
+    requestNo: row.request_no,
+    accessToken: row.access_token,
+    tokenExpiresAt: row.token_expires_at,
+    ticket: row.ticket,
+    iterators: row.iterators,
+    createdAt: row.created_at,
+    status: row.status as SessionStatus,
   };
-  sessionsByRequestNo.set(requestNo, session);
-  sessionsByAccessToken.set(session.accessToken, requestNo);
-  return { ...session };
+  if (row.cert_id !== null) session.certId = row.cert_id;
+  if (row.transaction_id !== null) session.transactionId = row.transaction_id;
+  if (row.auth_url_expires_at !== null) session.authUrlExpiresAt = row.auth_url_expires_at;
+  if (row.return_url !== null) session.returnUrl = row.return_url;
+  if (row.close_url !== null) session.closeUrl = row.close_url;
+  const svcTypes = parseStringArrayColumn("svc_types", row.svc_types);
+  if (svcTypes !== undefined) session.svcTypes = svcTypes;
+  if (row.method_type !== null) session.methodType = row.method_type;
+  const expMods = parseStringArrayColumn("exp_mods", row.exp_mods);
+  if (expMods !== undefined) session.expMods = expMods;
+  const identity = parseIdentityColumn(row.identity);
+  if (identity !== undefined) session.identity = identity;
+  if (row.web_transaction_id !== null) session.webTransactionId = row.web_transaction_id;
+  if (row.fail_code !== null) session.failCode = row.fail_code;
+  if (row.result_fetched_at !== null) session.resultFetchedAt = row.result_fetched_at;
+  return session;
 }
 
 function copySession(session: Session): Session {
@@ -106,51 +141,130 @@ function copySession(session: Session): Session {
   };
 }
 
+export function createSession(requestNo: string, options?: CreateSessionOptions): Session {
+  const now = options?.now ?? Date.now();
+  const tokenTtlMs = options?.tokenTtlMs ?? DEFAULT_TOKEN_TTL_MS;
+  const iterators = options?.iterators ?? 66;
+  const clientId = options?.clientId ?? "test-client-id";
+
+  const session: Session = {
+    requestNo,
+    accessToken: buildAccessToken(requestNo, now, tokenTtlMs, clientId, iterators),
+    tokenExpiresAt: now + tokenTtlMs,
+    ticket: randomBytes(42).toString("base64url"),
+    iterators,
+    createdAt: now,
+    status: "CREATED",
+  };
+
+  // Rotation: DELETE any existing row for the request_no, then INSERT, in
+  // ONE transaction — the old token/certId become invalid immediately.
+  const db = getDb();
+  try {
+    db.exec("BEGIN IMMEDIATE");
+    db.prepare("DELETE FROM sessions WHERE request_no = ?").run(requestNo);
+    db.prepare(
+      "INSERT INTO sessions(request_no, client_id, access_token, ticket, iterators, token_expires_at, created_at, status) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run(
+      session.requestNo,
+      clientId,
+      session.accessToken,
+      session.ticket,
+      session.iterators,
+      session.tokenExpiresAt,
+      session.createdAt,
+      session.status,
+    );
+    db.exec("COMMIT");
+  } catch (e) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      /* never mask the original error */
+    }
+    throw e;
+  }
+  return { ...session };
+}
+
+const SELECT_COLUMNS =
+  "request_no, access_token, ticket, iterators, token_expires_at, created_at, cert_id, transaction_id, auth_url_expires_at, return_url, close_url, svc_types, method_type, exp_mods, status, identity, web_transaction_id, fail_code, result_fetched_at";
+
 export function loadByRequestNo(requestNo: string): Session | undefined {
-  const session = sessionsByRequestNo.get(requestNo);
-  return session === undefined ? undefined : copySession(session);
+  const row = getDb().prepare(`SELECT ${SELECT_COLUMNS} FROM sessions WHERE request_no = ?`).get(requestNo) as
+    | SessionRow
+    | undefined;
+  if (row === undefined) return undefined;
+  return rowToSession(row);
 }
 
 export function loadByCertId(certId: string): Session | undefined {
-  const requestNo = sessionsByCertId.get(certId);
-  if (requestNo === undefined) return undefined;
-  return loadByRequestNo(requestNo);
+  const row = getDb().prepare(`SELECT ${SELECT_COLUMNS} FROM sessions WHERE cert_id = ?`).get(certId) as
+    | SessionRow
+    | undefined;
+  if (row === undefined) return undefined;
+  return rowToSession(row);
 }
 
 export function loadByAccessToken(accessToken: string): Session | undefined {
-  const requestNo = sessionsByAccessToken.get(accessToken);
-  if (requestNo === undefined) return undefined;
-  return loadByRequestNo(requestNo);
+  const row = getDb().prepare(`SELECT ${SELECT_COLUMNS} FROM sessions WHERE access_token = ?`).get(accessToken) as
+    | SessionRow
+    | undefined;
+  if (row === undefined) return undefined;
+  return rowToSession(row);
 }
 
-// Merge `patch` into the stored session and keep the secondary indexes in
-// sync: changing accessToken or certId deletes the stale index entry and
-// registers the new one, so rotation (repeat token/url issuance performed
-// by the route layer) invalidates the previous values.
+// Merge `patch` into the stored session: UPDATE SET from the patch's
+// own-keys ONLY. `undefined` values become NULL (`node:sqlite` cannot bind
+// `undefined`); reads map NULL back to `undefined`, so e.g.
+// `updateSession(req, { failCode: undefined })` clears the field.
 export function updateSession(requestNo: string, patch: Partial<Session>): Session | undefined {
-  const current = sessionsByRequestNo.get(requestNo);
+  const current = loadByRequestNo(requestNo);
   if (current === undefined) return undefined;
 
-  if ("accessToken" in patch && patch.accessToken !== current.accessToken) {
-    if (sessionsByAccessToken.get(current.accessToken) === requestNo) {
-      sessionsByAccessToken.delete(current.accessToken);
-    }
-  }
-  if ("certId" in patch && patch.certId !== current.certId) {
-    if (current.certId !== undefined && sessionsByCertId.get(current.certId) === requestNo) {
-      sessionsByCertId.delete(current.certId);
-    }
-  }
+  const columnFor: Record<string, string> = {
+    accessToken: "access_token",
+    tokenExpiresAt: "token_expires_at",
+    ticket: "ticket",
+    iterators: "iterators",
+    createdAt: "created_at",
+    certId: "cert_id",
+    transactionId: "transaction_id",
+    authUrlExpiresAt: "auth_url_expires_at",
+    returnUrl: "return_url",
+    closeUrl: "close_url",
+    svcTypes: "svc_types",
+    methodType: "method_type",
+    expMods: "exp_mods",
+    status: "status",
+    identity: "identity",
+    webTransactionId: "web_transaction_id",
+    failCode: "fail_code",
+    resultFetchedAt: "result_fetched_at",
+  };
+  const jsonColumns = new Set(["svc_types", "exp_mods", "identity"]);
 
-  const updated: Session = { ...current, ...patch, requestNo: current.requestNo };
-  sessionsByRequestNo.set(requestNo, updated);
-  if (updated.accessToken !== undefined) {
-    sessionsByAccessToken.set(updated.accessToken, requestNo);
+  const assignments: string[] = [];
+  const values: (string | number | null)[] = [];
+  for (const key of Object.keys(patch)) {
+    const column = columnFor[key];
+    if (column === undefined) continue;
+    const value = patch[key as keyof Partial<Session>];
+    if (value === undefined) {
+      assignments.push(`${column} = ?`);
+      values.push(null);
+    } else if (jsonColumns.has(column)) {
+      assignments.push(`${column} = ?`);
+      values.push(JSON.stringify(value));
+    } else if (typeof value === "string" || typeof value === "number") {
+      assignments.push(`${column} = ?`);
+      values.push(value);
+    }
   }
-  if (updated.certId !== undefined) {
-    sessionsByCertId.set(updated.certId, requestNo);
+  if (assignments.length > 0) {
+    getDb().prepare(`UPDATE sessions SET ${assignments.join(", ")} WHERE request_no = ?`).run(...values, requestNo);
   }
-  return copySession(updated);
+  return loadByRequestNo(requestNo);
 }
 
 export function isTokenExpired(session: Session, now: number = Date.now()): boolean {
@@ -164,17 +278,16 @@ export function isAuthWindowExpired(session: Session, now: number = Date.now()):
 
 // Sweep token-expired sessions only. Auth-window-expired sessions are
 // deliberately kept so downstream routes can answer 3032 instead of 3029.
-// Returns the number of purged sessions.
+// Returns the number of purged sessions. Never throws: when the DB is not
+// initialized (or already closed — the 60s timer may fire after closeDb()),
+// returns 0.
 export function purgeExpired(now: number = Date.now()): number {
-  let purged = 0;
-  for (const session of sessionsByRequestNo.values()) {
-    if (isTokenExpired(session, now)) {
-      sessionsByRequestNo.delete(session.requestNo);
-      removeIndexes(session);
-      purged += 1;
-    }
+  try {
+    const result = getDb().prepare("DELETE FROM sessions WHERE token_expires_at <= ?").run(now);
+    return Number(result.changes);
+  } catch {
+    return 0;
   }
-  return purged;
 }
 
 export function startPurgeTimer(intervalMs: number = 60_000): NodeJS.Timeout {
@@ -188,11 +301,18 @@ export function startPurgeTimer(intervalMs: number = 60_000): NodeJS.Timeout {
 // Lazy sweep on top of the explicit reads is intentionally a no-op for
 // deletion: expiry is evaluated by the caller (isTokenExpired /
 // isAuthWindowExpired) BEFORE any purge so unknown vs expired stay
-// distinct. The 60s timer owns deletion.
-startPurgeTimer();
+// distinct. The 60s timer owns deletion. NOTE: no top-level
+// startPurgeTimer() call — importing this module must never touch the DB;
+// server.ts owns the call.
 
 export function clearStore(): void {
-  sessionsByRequestNo.clear();
-  sessionsByCertId.clear();
-  sessionsByAccessToken.clear();
+  getDb().exec("DELETE FROM sessions");
+}
+
+// Test/maintenance helper: empties sessions AND clients but NEVER meta
+// (preserves `seeded_at` so the one-time seed stays seeded).
+export function resetAll(): void {
+  const db = getDb();
+  db.exec("DELETE FROM sessions");
+  db.exec("DELETE FROM clients");
 }
