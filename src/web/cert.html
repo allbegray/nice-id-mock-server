@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NICE 통합인증 Mock 표준창</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; margin: 0; background: #f2f4f8; color: #222; }
+  .wrap { max-width: 560px; margin: 24px auto; background: #fff; border: 1px solid #d9dee6; border-radius: 12px; padding: 24px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #666; font-size: 13px; margin-bottom: 16px; }
+  dl.info { display: grid; grid-template-columns: 110px 1fr; gap: 6px 12px; font-size: 13px; background: #f7f9fc; border: 1px solid #e3e8f0; border-radius: 8px; padding: 12px 14px; margin: 0 0 16px; word-break: break-all; }
+  dl.info dt { color: #666; }
+  dl.info dd { margin: 0; }
+  .error { background: #fdecec; border: 1px solid #f5b5b5; color: #a12020; border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-bottom: 16px; }
+  label { display: block; font-size: 13px; color: #444; margin: 12px 0 4px; }
+  input[type="text"], select { width: 100%; font-size: 15px; padding: 9px 10px; border: 1px solid #c6cdd8; border-radius: 8px; }
+  .row { display: flex; gap: 8px; }
+  .row > div { flex: 1; }
+  .presets { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 4px; }
+  .presets button { font-size: 13px; padding: 6px 10px; border: 1px solid #c6cdd8; background: #f7f9fc; border-radius: 16px; cursor: pointer; }
+  .actions { display: flex; gap: 10px; margin-top: 20px; }
+  .actions .primary { flex: 2; background: #1a73e8; color: #fff; border: none; border-radius: 8px; font-size: 16px; padding: 12px; cursor: pointer; }
+  .actions .secondary { flex: 1; background: #fff; color: #333; border: 1px solid #c6cdd8; border-radius: 8px; font-size: 16px; padding: 12px; cursor: pointer; }
+  .hint { font-size: 12px; color: #888; margin-top: 4px; }
+  #failCustomWrap { margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>NICE 통합인증 Mock 표준창</h1>
+  <div class="sub">로컬 개발용 모의 인증창입니다. 실제 NICE 서버와 통신하지 않습니다.</div>
+
+  <dl class="info">
+    <dt>요청번호</dt><dd>{{REQUEST_NO}}</dd>
+    <dt>인증수단</dt><dd>{{SVC_TYPES}}</dd>
+    <dt>전달방식</dt><dd>{{METHOD_TYPE}}</dd>
+    <dt>return_url</dt><dd>{{RETURN_URL}}</dd>
+    <dt>close_url</dt><dd>{{CLOSE_URL_DISPLAY}}</dd>
+    <dt>남은 시간</dt><dd><span id="ttl" data-expires-at="{{EXPIRES_AT}}">{{TTL_SECONDS}}</span>초</dd>
+  </dl>
+
+  {{ERROR_BOX}}
+
+  <div class="presets">
+    <button type="button" data-preset="adultMale">성인남성</button>
+    <button type="button" data-preset="adultFemale">성인여성</button>
+    <button type="button" data-preset="minor">미성년</button>
+    <button type="button" data-preset="foreigner">외국인</button>
+  </div>
+
+  <form id="completeForm" method="POST" action="/ido/cert/request/{{CERT_ID}}/complete">
+    <label for="name">이름</label>
+    <input type="text" id="name" name="name" value="{{NAME}}" autocomplete="off">
+
+    <label for="birthdate">생년월일 (YYYYMMDD)</label>
+    <input type="text" id="birthdate" name="birthdate" value="{{BIRTHDATE}}" inputmode="numeric" maxlength="8">
+
+    <div class="row">
+      <div>
+        <label for="gender">성별</label>
+        <select id="gender" name="gender">
+          <option value="1" {{SEL_GENDER_1}}>남자 (1)</option>
+          <option value="0" {{SEL_GENDER_0}}>여자 (0)</option>
+        </select>
+      </div>
+      <div>
+        <label for="national_info">내외국인</label>
+        <select id="national_info" name="national_info">
+          <option value="0" {{SEL_NATIONAL_0}}>내국인 (0)</option>
+          <option value="1" {{SEL_NATIONAL_1}}>외국인 (1)</option>
+        </select>
+      </div>
+    </div>
+
+    <label for="mobile_co">통신사</label>
+    <select id="mobile_co" name="mobile_co">
+      <option value="1" {{SEL_MOBILE_1}}>SKT (1)</option>
+      <option value="2" {{SEL_MOBILE_2}}>KT (2)</option>
+      <option value="3" {{SEL_MOBILE_3}}>LGU+ (3)</option>
+      <option value="5" {{SEL_MOBILE_5}}>SKT 알뜰폰 (5)</option>
+      <option value="6" {{SEL_MOBILE_6}}>KT 알뜰폰 (6)</option>
+      <option value="7" {{SEL_MOBILE_7}}>LGU+ 알뜰폰 (7)</option>
+    </select>
+
+    <label for="mobile_no">휴대폰번호 (숫자만)</label>
+    <input type="text" id="mobile_no" name="mobile_no" value="{{MOBILE_NO}}" inputmode="numeric" maxlength="11">
+
+    <label for="fail_code">오류 주입 (테스트용)</label>
+    <select id="fail_code" name="fail_code">
+      <option value="" {{SEL_FAIL_NONE}}>성공 (주입 없음)</option>
+      <option value="3032" {{SEL_FAIL_3032}}>3032 인증실패</option>
+      <option value="3029" {{SEL_FAIL_3029}}>3029 요청없음</option>
+      <option value="custom" {{SEL_FAIL_CUSTOM}}>커스텀 코드 직접입력</option>
+    </select>
+    <div id="failCustomWrap">
+      <input type="text" id="fail_code_custom" name="fail_code_custom" value="{{FAIL_CUSTOM}}" placeholder="예: 3999 (3xxx만 유효)">
+      <div class="hint">3xxx 형태의 코드만 실패로 처리됩니다. 그 외 값은 무시하고 성공 처리합니다.</div>
+    </div>
+
+    <div class="actions">
+      <button type="submit" class="primary">인증 완료</button>
+      <button type="submit" class="secondary" form="cancelForm">취소</button>
+    </div>
+  </form>
+
+  <form id="cancelForm" method="POST" action="/ido/cert/request/{{CERT_ID}}/cancel"></form>
+</div>
+
+<script>
+(function () {
+  var presets = {
+    adultMale: { name: "홍길동", birthdate: "19000208", gender: "1", national_info: "0", mobile_co: "2", mobile_no: "01012345678" },
+    adultFemale: { name: "김영희", birthdate: "19900515", gender: "0", national_info: "0", mobile_co: "1", mobile_no: "01087654321" },
+    minor: { name: "박민준", birthdate: "20150101", gender: "1", national_info: "0", mobile_co: "3", mobile_no: "01011112222" },
+    foreigner: { name: "Alex Kim", birthdate: "19881123", gender: "1", national_info: "1", mobile_co: "2", mobile_no: "01033334444" }
+  };
+  function setValue(id, value) {
+    var el = document.getElementById(id);
+    if (el) el.value = value;
+  }
+  document.querySelectorAll("[data-preset]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var p = presets[btn.getAttribute("data-preset")];
+      if (!p) return;
+      setValue("name", p.name);
+      setValue("birthdate", p.birthdate);
+      setValue("gender", p.gender);
+      setValue("national_info", p.national_info);
+      setValue("mobile_co", p.mobile_co);
+      setValue("mobile_no", p.mobile_no);
+    });
+  });
+
+  var ttlEl = document.getElementById("ttl");
+  if (ttlEl) {
+    var expiresAt = Number(ttlEl.getAttribute("data-expires-at"));
+    function tick() {
+      if (!isFinite(expiresAt) || expiresAt <= 0) return;
+      var left = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
+      ttlEl.textContent = String(left);
+    }
+    tick();
+    setInterval(tick, 1000);
+  }
+})();
+</script>
+</body>
+</html>

@@ -16,6 +16,14 @@ const certHtmlPath = join(
   "cert.html",
 );
 
+export async function readCertHtml(): Promise<string | undefined> {
+  try {
+    return await readFile(certHtmlPath, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
 export function buildApp(configOverrides?: Partial<Config>): FastifyInstance {
   const config = { ...loadConfig(), ...configOverrides };
   void config;
@@ -36,15 +44,6 @@ export function buildApp(configOverrides?: Partial<Config>): FastifyInstance {
 
   app.get("/health", async (_request, _reply) => {
     return { status: "UP" };
-  });
-
-  app.get("/cert.html", async (_request, reply) => {
-    try {
-      const html = await readFile(certHtmlPath, "utf8");
-      return reply.type("text/html; charset=utf-8").send(html);
-    } catch {
-      return reply.code(404).send({ statusCode: 404, error: "Not Found" });
-    }
   });
 
   app.register(authTokenRoutes);
