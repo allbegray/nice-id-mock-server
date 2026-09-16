@@ -68,21 +68,55 @@ describe("session store", () => {
     assert.equal(direct?.request_no, REQUEST_NO);
   });
 
-  it("records client_id as write-only audit data (no clientId on Session)", () => {
+  it("exposes stored client_id as readable Session.clientId (default + explicit)", () => {
     const now = 1700000000000;
     const session = createSession(REQUEST_NO, { now, clientId: "acme-client" });
-    assert.equal("clientId" in session, false);
+    assert.equal(session.clientId, "acme-client");
     const row = getDb().prepare("SELECT client_id FROM sessions WHERE request_no = ?").get(REQUEST_NO) as
       | { client_id: string }
       | undefined;
     assert.equal(row?.client_id, "acme-client");
 
     const def = createSession("REQ-DEFAULT-CLIENT-00001", { now });
-    assert.equal("clientId" in def, false);
+    assert.equal(def.clientId, "test-client-id");
     const defRow = getDb().prepare("SELECT client_id FROM sessions WHERE request_no = ?").get(
       "REQ-DEFAULT-CLIENT-00001",
     ) as { client_id: string } | undefined;
     assert.equal(defRow?.client_id, "test-client-id");
+  });
+
+  it("carries clientId identically in all 3 loaders", () => {
+    const now = 1700000000000;
+    const created = createSession(REQUEST_NO, { now, clientId: "client-a" });
+    updateSession(REQUEST_NO, { certId: "S-client-a-cert", status: "PENDING" });
+    assert.equal(loadByRequestNo(REQUEST_NO)?.clientId, "client-a");
+    assert.equal(loadByAccessToken(created.accessToken)?.clientId, "client-a");
+    assert.equal(loadByCertId("S-client-a-cert")?.clientId, "client-a");
+  });
+
+  it("rotation adopts the presenting clientId on all 3 loaders", () => {
+    const now = 1700000000000;
+    const req = "REQ-ROTATE-CLIENT-000001";
+    const first = createSession(req, { now, clientId: "client-a" });
+    assert.equal(first.clientId, "client-a");
+    updateSession(req, { certId: "S-rotate-old-cert", status: "PENDING" });
+    const second = createSession(req, { now: now + 1, clientId: "client-b" });
+    assert.equal(second.clientId, "client-b");
+    assert.equal(loadByRequestNo(req)?.clientId, "client-b");
+    assert.equal(loadByAccessToken(second.accessToken)?.clientId, "client-b");
+    assert.equal(loadByAccessToken(first.accessToken), undefined);
+    updateSession(req, { certId: "S-rotate-new-cert", status: "PENDING" });
+    assert.equal(loadByCertId("S-rotate-new-cert")?.clientId, "client-b");
+  });
+
+  it("updateSession silently ignores clientId (no throw, value unchanged)", () => {
+    const now = 1700000000000;
+    createSession(REQUEST_NO, { now, clientId: "client-a" });
+    const before = loadByRequestNo(REQUEST_NO)?.clientId;
+    assert.doesNotThrow(() => updateSession(REQUEST_NO, { clientId: "hacker-client" }));
+    const after = loadByRequestNo(REQUEST_NO)?.clientId;
+    assert.equal(before, "client-a");
+    assert.equal(after, "client-a");
   });
 
   it("token expiry boundary: now >= tokenExpiresAt counts expired", () => {

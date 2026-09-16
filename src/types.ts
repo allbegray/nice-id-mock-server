@@ -11,6 +11,7 @@ export type SessionStatus = "CREATED" | "PENDING" | "SUCCESS" | "FAILED" | "CANC
 
 export interface Session {
   requestNo: string;
+  clientId: string;
   accessToken: string;
   tokenExpiresAt: number;
   ticket: string;

@@ -14,8 +14,9 @@ import type { Identity, Session, SessionStatus } from "./types.ts";
 //   - Reads never purge. purgeExpired() removes ONLY token-expired
 //     sessions — NEVER auth-window-expired ones, because routes must still
 //     return 3032 (not 3029) for those.
-// - `client_id` is write-only audit data: it is stored per row but never
-//   mapped onto the Session return objects.
+// - `client_id` is readable, immutable audit data: it is stored per row at
+//   creation and mapped onto Session.clientId on every load; updateSession
+//   can never change it (no columnFor entry by design).
 
 export const DEFAULT_TOKEN_TTL_MS = 86400000;
 
@@ -56,6 +57,7 @@ function buildAccessToken(
 
 interface SessionRow {
   request_no: string;
+  client_id: string;
   access_token: string;
   ticket: string;
   iterators: number;
@@ -107,6 +109,7 @@ function parseIdentityColumn(raw: string | null): Identity | undefined {
 function rowToSession(row: SessionRow): Session {
   const session: Session = {
     requestNo: row.request_no,
+    clientId: row.client_id,
     accessToken: row.access_token,
     tokenExpiresAt: row.token_expires_at,
     ticket: row.ticket,
@@ -149,6 +152,7 @@ export function createSession(requestNo: string, options?: CreateSessionOptions)
 
   const session: Session = {
     requestNo,
+    clientId,
     accessToken: buildAccessToken(requestNo, now, tokenTtlMs, clientId, iterators),
     tokenExpiresAt: now + tokenTtlMs,
     ticket: randomBytes(42).toString("base64url"),
@@ -188,7 +192,7 @@ export function createSession(requestNo: string, options?: CreateSessionOptions)
 }
 
 const SELECT_COLUMNS =
-  "request_no, access_token, ticket, iterators, token_expires_at, created_at, cert_id, transaction_id, auth_url_expires_at, return_url, close_url, svc_types, method_type, exp_mods, status, identity, web_transaction_id, fail_code, result_fetched_at";
+  "request_no, client_id, access_token, ticket, iterators, token_expires_at, created_at, cert_id, transaction_id, auth_url_expires_at, return_url, close_url, svc_types, method_type, exp_mods, status, identity, web_transaction_id, fail_code, result_fetched_at";
 
 export function loadByRequestNo(requestNo: string): Session | undefined {
   const row = getDb().prepare(`SELECT ${SELECT_COLUMNS} FROM sessions WHERE request_no = ?`).get(requestNo) as
@@ -222,6 +226,8 @@ export function updateSession(requestNo: string, patch: Partial<Session>): Sessi
   const current = loadByRequestNo(requestNo);
   if (current === undefined) return undefined;
 
+  // clientId는 생성 후 불변: columnFor에 clientId 항목을 두지 않으므로
+  // updateSession 패치 키는 무시된다 (throw 없음).
   const columnFor: Record<string, string> = {
     accessToken: "access_token",
     tokenExpiresAt: "token_expires_at",
