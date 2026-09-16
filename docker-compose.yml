@@ -1,0 +1,16 @@
+services:
+  nice-id-mock:
+    build: .
+    image: nice-id-mock:local
+    container_name: nice-id-mock
+    # NOTE: a PORT override keeps the container healthy (shell-form HEALTHCHECK
+    # reads $PORT) but the host mapping below must be changed to match.
+    ports:
+      - "8899:8899"
+    environment:
+      - "PUBLIC_BASE_URL=http://localhost:8899"
+      - "CLIENT_ID=test-client-id"
+      - "CLIENT_SECRET=test-client-secret"
+      - "ITERATORS=66"
+      - "STRICT_ONE_TIME_RESULT=false"
+    restart: unless-stopped
