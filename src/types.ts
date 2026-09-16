@@ -30,3 +30,10 @@ export interface Session {
   failCode?: string;
   resultFetchedAt?: number;
 }
+
+export interface Client {
+  clientId: string;
+  clientSecret: string;
+  createdAt: number;
+  updatedAt: number;
+}
