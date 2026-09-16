@@ -5,13 +5,13 @@
 A local mock server for NICE identity verification (token → standard window → encrypted result) so you can develop the full flow without the real NICE service. Node 26 + SQLite persistence.
 
 ```bash
-docker run -d -p 127.0.0.1:8899:8899 -e PUBLIC_BASE_URL=http://localhost:8899 allbegray/nice-id-mock:v0.1.0
+docker run -d -p 127.0.0.1:8899:8899 -e PUBLIC_BASE_URL=http://localhost:8899 allbegray/nice-id-mock-server:v0.1.1
 curl -s http://localhost:8899/health
 docker compose up -d --build
 ```
 
 [![CI](https://github.com/allbegray/nice-id-mock-server/actions/workflows/ci.yml/badge.svg)](https://github.com/allbegray/nice-id-mock-server/actions/workflows/ci.yml)
-[![Docker Pulls](https://img.shields.io/docker/pulls/allbegray/nice-id-mock)](https://hub.docker.com/r/allbegray/nice-id-mock)
+[![Docker Pulls](https://img.shields.io/docker/pulls/allbegray/nice-id-mock-server)](https://hub.docker.com/r/allbegray/nice-id-mock-server)
 
 로컬 개발용 NICE 본인인증 API 목 서버. 실 NICE 서버 없이도 토큰 발급부터 표준창 인증, 암호화 결과 조회까지 전체 흐름을 로컬에서 돌릴 수 있다.
 
@@ -379,17 +379,17 @@ class NiceIdReturnSampleController(
 
 이미지는 Docker Hub와 GHCR에 함께 올라간다.
 
-- Docker Hub: https://hub.docker.com/r/allbegray/nice-id-mock
-- GHCR 미러: `ghcr.io/allbegray/nice-id-mock` (`docker pull ghcr.io/allbegray/nice-id-mock:v0.1.0`)
+- Docker Hub: https://hub.docker.com/r/allbegray/nice-id-mock-server
+- GHCR 미러: `ghcr.io/allbegray/nice-id-mock-server` (`docker pull ghcr.io/allbegray/nice-id-mock-server:v0.1.1`)
 
 태그 정책: `latest`는 최신 릴리즈, `vX.Y.Z`는 고정 핀이다. 재현이 필요하면 버전을 찍어 쓴다.
 
 ```bash
-docker pull allbegray/nice-id-mock:v0.1.0
+docker pull allbegray/nice-id-mock-server:v0.1.1
 ```
 
 ```bash
-docker run -d -p 127.0.0.1:8899:8899 -e PUBLIC_BASE_URL=http://localhost:8899 -v niceid-data:/app/data allbegray/nice-id-mock:v0.1.0
+docker run -d -p 127.0.0.1:8899:8899 -e PUBLIC_BASE_URL=http://localhost:8899 -v niceid-data:/app/data allbegray/nice-id-mock-server:v0.1.1
 ```
 
 소스에서 직접 빌드해 띄우는 방법은 위 Quick start를 그대로 쓴다 (`docker compose up -d --build`).
