@@ -46,8 +46,8 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: |
-            allbegray/nice-id-mock
-            ghcr.io/allbegray/nice-id-mock
+            allbegray/nice-id-mock-server
+            ghcr.io/allbegray/nice-id-mock-server
           tags: |
             type=semver,pattern=v{{version}}
             type=semver,pattern=v{{major}}.{{minor}}
