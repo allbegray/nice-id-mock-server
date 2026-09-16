@@ -1,8 +1,9 @@
-import { describe, it, beforeEach } from "node:test";
+import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 import { buildApp } from "../src/app.ts";
-import { clearStore, createSession, loadByRequestNo, updateSession } from "../src/store.ts";
+import { createSession, loadByRequestNo, updateSession } from "../src/store.ts";
+import { initTestDb, closeTestDb } from "./helpers/testDb.ts";
 
 const REQUEST_NO = "REQ12345678901234567890";
 const RETURN_URL = `https://merchant.example.com/nice-id/return?requestNo=${REQUEST_NO}`;
@@ -54,7 +55,11 @@ function validJson(overrides: Record<string, unknown> = {}): Record<string, unkn
 
 describe("GET /ido/cert/request/:certId", () => {
   beforeEach(() => {
-    clearStore();
+    initTestDb();
+  });
+
+  afterEach(() => {
+    closeTestDb();
   });
 
   it("page 200 contains request_no and return_url", async () => {
@@ -152,7 +157,11 @@ describe("GET /ido/cert/request/:certId", () => {
 
 describe("POST /ido/cert/request/:certId/complete", () => {
   beforeEach(() => {
-    clearStore();
+    initTestDb();
+  });
+
+  afterEach(() => {
+    closeTestDb();
   });
 
   it("GET-mode complete (form-encoded) -> 302 Location with requestNo + web_transaction_id", async () => {
@@ -291,7 +300,11 @@ describe("POST /ido/cert/request/:certId/complete", () => {
 
 describe("POST /ido/cert/request/:certId/cancel", () => {
   beforeEach(() => {
-    clearStore();
+    initTestDb();
+  });
+
+  afterEach(() => {
+    closeTestDb();
   });
 
   it("cancel with close_url -> 302 to close_url + CANCELLED", async () => {
@@ -337,7 +350,11 @@ describe("POST /ido/cert/request/:certId/cancel", () => {
 
 describe("alias route removal", () => {
   beforeEach(() => {
-    clearStore();
+    initTestDb();
+  });
+
+  afterEach(() => {
+    closeTestDb();
   });
 
   it("GET /cert.html is gone (404)", async () => {

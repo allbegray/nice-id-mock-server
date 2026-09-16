@@ -2,7 +2,8 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 import { buildApp } from "../src/app.ts";
-import { clearStore, createSession, loadByRequestNo, updateSession } from "../src/store.ts";
+import { createSession, loadByRequestNo, updateSession } from "../src/store.ts";
+import { initTestDb, closeTestDb } from "./helpers/testDb.ts";
 import { decryptForTest } from "../src/crypto.ts";
 import {
   GENDER_CODES,
@@ -74,7 +75,7 @@ describe("POST /ido/intc/v1.0/auth/result", () => {
   let strictWasSet: boolean;
 
   beforeEach(() => {
-    clearStore();
+    initTestDb();
     savedStrict = process.env["STRICT_ONE_TIME_RESULT"];
     strictWasSet = Object.hasOwn(process.env, "STRICT_ONE_TIME_RESULT");
     delete process.env["STRICT_ONE_TIME_RESULT"];
@@ -86,7 +87,7 @@ describe("POST /ido/intc/v1.0/auth/result", () => {
     } else {
       delete process.env["STRICT_ONE_TIME_RESULT"];
     }
-    clearStore();
+    closeTestDb();
   });
 
   it("happy path: 0000 with exact 4 fields, decryptable enc_data, resultFetchedAt set", async () => {

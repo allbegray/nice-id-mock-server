@@ -1,7 +1,8 @@
-import { describe, it, beforeEach, before, after } from "node:test";
+import { describe, it, beforeEach, afterEach, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { buildApp } from "../src/app.ts";
-import { clearStore, createSession, loadByCertId, loadByRequestNo } from "../src/store.ts";
+import { createSession, loadByCertId, loadByRequestNo } from "../src/store.ts";
+import { initTestDb, closeTestDb } from "./helpers/testDb.ts";
 
 const REQUEST_NO = "REQ12345678901234567890";
 const OTHER_REQUEST_NO = "REQ09876543210987654321";
@@ -42,7 +43,11 @@ describe("POST /ido/intc/v1.0/auth/url", () => {
   });
 
   beforeEach(() => {
-    clearStore();
+    initTestDb();
+  });
+
+  afterEach(() => {
+    closeTestDb();
   });
 
   it("happy path: 0000 with exact fields, session updated, request_no echoed", async () => {

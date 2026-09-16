@@ -6,7 +6,8 @@ import { buildApp } from "../src/app.ts";
 import { loadConfig } from "../src/config.ts";
 import { decryptForTest } from "../src/crypto.ts";
 import { deriveCi, deriveDi, RESULT_JSON_KEYS } from "../src/identity.ts";
-import { clearStore } from "../src/store.ts";
+import { createClient } from "../src/clients.ts";
+import { initTestDb, closeTestDb } from "./helpers/testDb.ts";
 import { startReturnCatcher } from "./helpers/returnCatcher.ts";
 import type { ReturnCatcher } from "./helpers/returnCatcher.ts";
 
@@ -176,7 +177,8 @@ describe("full-flow e2e with return_url catcher", () => {
   let hadPublicBaseUrl = false;
 
   beforeEach(() => {
-    clearStore();
+    initTestDb();
+    createClient("test-client-id", "test-client-secret");
     hadPublicBaseUrl = Object.hasOwn(process.env, "PUBLIC_BASE_URL");
     savedPublicBaseUrl = process.env["PUBLIC_BASE_URL"];
   });
@@ -187,7 +189,7 @@ describe("full-flow e2e with return_url catcher", () => {
     } else {
       delete process.env["PUBLIC_BASE_URL"];
     }
-    clearStore();
+    closeTestDb();
   });
 
   it("GET flow: token -> url -> auto=1 redirect -> catcher GET -> result decrypts", async () => {
