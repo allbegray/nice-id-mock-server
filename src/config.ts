@@ -1,0 +1,64 @@
+import type { Identity } from "./types.ts";
+
+export interface Config {
+  port: number;
+  host: string;
+  publicBaseUrl: string;
+  clientId: string;
+  clientSecret: string;
+  strictCredentials: boolean;
+  tokenTtlMs: number;
+  authUrlTtlMs: number;
+  iterators: number;
+  strictOneTimeResult: boolean;
+  defaultIdentity: Identity;
+}
+
+function parseNumberEnv(name: string, raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || !Number.isInteger(value)) {
+    throw new Error(`Invalid ${name}=${JSON.stringify(raw)}: expected an integer number`);
+  }
+  return value;
+}
+
+function parseBoolEnv(name: string, raw: string | undefined, fallback: boolean): boolean {
+  if (raw === undefined || raw === "") return fallback;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "true" || normalized === "1" || normalized === "yes") return true;
+  if (normalized === "false" || normalized === "0" || normalized === "no") return false;
+  throw new Error(`Invalid ${name}=${JSON.stringify(raw)}: expected a boolean (true/false)`);
+}
+
+function parseStringEnv(name: string, raw: string | undefined, fallback: string): string {
+  if (raw === undefined || raw === "") return fallback;
+  return raw;
+}
+
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+  return {
+    port: parseNumberEnv("PORT", env["PORT"], 8899),
+    host: parseStringEnv("HOST", env["HOST"], "0.0.0.0"),
+    publicBaseUrl: parseStringEnv("PUBLIC_BASE_URL", env["PUBLIC_BASE_URL"], "http://localhost:8899"),
+    clientId: parseStringEnv("CLIENT_ID", env["CLIENT_ID"], "test-client-id"),
+    clientSecret: parseStringEnv("CLIENT_SECRET", env["CLIENT_SECRET"], "test-client-secret"),
+    strictCredentials: parseBoolEnv("STRICT_CREDENTIALS", env["STRICT_CREDENTIALS"], true),
+    tokenTtlMs: parseNumberEnv("TOKEN_TTL_MS", env["TOKEN_TTL_MS"], 86400000),
+    authUrlTtlMs: parseNumberEnv("AUTH_URL_TTL_MS", env["AUTH_URL_TTL_MS"], 600000),
+    iterators: parseNumberEnv("ITERATORS", env["ITERATORS"], 66),
+    strictOneTimeResult: parseBoolEnv(
+      "STRICT_ONE_TIME_RESULT",
+      env["STRICT_ONE_TIME_RESULT"],
+      false,
+    ),
+    defaultIdentity: {
+      name: "홍길동",
+      birthdate: "19000208",
+      gender: "1",
+      nationalInfo: "0",
+      mobileCo: "2",
+      mobileNo: "01012345678",
+    },
+  };
+}
