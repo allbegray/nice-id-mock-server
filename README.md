@@ -1,5 +1,18 @@
 # NICE 본인인증 목 서버 (nice-id-mock)
 
+## NICE 본인인증 Mock Server
+
+A local mock server for NICE identity verification (token → standard window → encrypted result) so you can develop the full flow without the real NICE service. Node 26 + SQLite persistence.
+
+```bash
+docker run -d -p 127.0.0.1:8899:8899 -e PUBLIC_BASE_URL=http://localhost:8899 allbegray/nice-id-mock:v0.1.0
+curl -s http://localhost:8899/health
+docker compose up -d --build
+```
+
+[![CI](https://github.com/allbegray/nice-id-mock-server/actions/workflows/ci.yml/badge.svg)](https://github.com/allbegray/nice-id-mock-server/actions/workflows/ci.yml)
+[![Docker Pulls](https://img.shields.io/docker/pulls/allbegray/nice-id-mock)](https://hub.docker.com/r/allbegray/nice-id-mock)
+
 로컬 개발용 NICE 본인인증 API 목 서버. 실 NICE 서버 없이도 토큰 발급부터 표준창 인증, 암호화 결과 조회까지 전체 흐름을 로컬에서 돌릴 수 있다.
 
 기본 신원은 `홍길동 / 19000208 / 01012345678` 로 고정되어 있어 테스트 결과가 결정적이다.
@@ -362,8 +375,35 @@ class NiceIdReturnSampleController(
 - 이 버전에서 규칙이 바뀌어 동일인이어도 CI/DI 값이 이전과 다를 수 있음 — 목 전용
 - 실 NICE의 CI/DI와 무관하다. `test-client-id` 같은 더미로만 확인한다
 
+## Docker 이미지
+
+이미지는 Docker Hub와 GHCR에 함께 올라간다.
+
+- Docker Hub: https://hub.docker.com/r/allbegray/nice-id-mock
+- GHCR 미러: `ghcr.io/allbegray/nice-id-mock` (`docker pull ghcr.io/allbegray/nice-id-mock:v0.1.0`)
+
+태그 정책: `latest`는 최신 릴리즈, `vX.Y.Z`는 고정 핀이다. 재현이 필요하면 버전을 찍어 쓴다.
+
+```bash
+docker pull allbegray/nice-id-mock:v0.1.0
+```
+
+```bash
+docker run -d -p 127.0.0.1:8899:8899 -e PUBLIC_BASE_URL=http://localhost:8899 -v niceid-data:/app/data allbegray/nice-id-mock:v0.1.0
+```
+
+소스에서 직접 빌드해 띄우는 방법은 위 Quick start를 그대로 쓴다 (`docker compose up -d --build`).
+
+익명 pull은 100 pulls/6h 제한이 있다. 한도를 넘기면 `docker login` 후 다시 받는다.
+
+> `/admin` and `/admin/clients*` have NO authentication and can create/rotate credentials — bind to loopback / never expose this container to a public host.
+
 ## 보안 경고
 
 - 이 mock은 로컬 개발용이다. 외부에 노출하지 않는다. 특히 관리 API(`/admin`, `/admin/clients*`)에는 인증이 전혀 없으므로, `8899` 포트를 외부에 열면 누구나 자격증명을 만들고 바꿀 수 있다. 로컬 루프백에서만 쓴다.
 - 실 NICE 자격증명(`client-id`, `client-secret`)과 실 NICE 엔드포인트를 여기에 넣지 않는다. 예시의 `test-client-id`, `test-client-secret`, `demo-client-01` 같은 더미만 쓴다.
 - `ci`, `di` 같은 개인식별정보를 로그에 남기지 않는다. 토큰 원문을 로그나 캡처에 붙여넣지 않는다 (확인할 땐 앞자리만 마스킹해서 본다).
+
+## 라이선스
+
+MIT. 자세한 내용은 `LICENSE` 파일을 본다.
