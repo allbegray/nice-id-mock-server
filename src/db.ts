@@ -22,8 +22,15 @@ export function initDb(path: string): void {
     "CREATE TABLE IF NOT EXISTS clients(client_id TEXT PRIMARY KEY, client_secret TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)",
   );
   db.exec(
-    "CREATE TABLE IF NOT EXISTS sessions(request_no TEXT PRIMARY KEY, client_id TEXT NOT NULL, access_token TEXT NOT NULL UNIQUE, ticket TEXT NOT NULL, iterators INTEGER NOT NULL, token_expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL, cert_id TEXT UNIQUE, transaction_id TEXT, auth_url_expires_at INTEGER, return_url TEXT, close_url TEXT, svc_types TEXT, method_type TEXT, exp_mods TEXT, status TEXT NOT NULL CHECK(status IN ('CREATED','PENDING','SUCCESS','FAILED','CANCELLED')), identity TEXT, web_transaction_id TEXT, fail_code TEXT, result_fetched_at INTEGER)",
+    "CREATE TABLE IF NOT EXISTS sessions(request_no TEXT PRIMARY KEY, client_id TEXT NOT NULL, access_token TEXT NOT NULL UNIQUE, ticket TEXT NOT NULL, iterators INTEGER NOT NULL, token_expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL, cert_id TEXT UNIQUE, transaction_id TEXT, auth_url_expires_at INTEGER, return_url TEXT, close_url TEXT, svc_types TEXT, method_type TEXT, exp_mods TEXT, status TEXT NOT NULL CHECK(status IN ('CREATED','PENDING','SUCCESS','FAILED','CANCELLED')), identity TEXT, web_transaction_id TEXT, fail_code TEXT, result_fetched_at INTEGER, auth_method TEXT)",
   );
+  // Additive migration for databases written by an older build.
+  const sessionColumns = new Set(
+    (db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[]).map((row) => row.name),
+  );
+  if (!sessionColumns.has("auth_method")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN auth_method TEXT");
+  }
   db.exec("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)");
   closed = false;
 }

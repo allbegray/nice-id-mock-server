@@ -11,7 +11,12 @@ const CLOSE_URL = "https://merchant.example.com/nice-id/close";
 
 function issuePending(
   methodType: string = "GET",
-  options: { closeUrl?: string; expired?: boolean } = {},
+  options: {
+    closeUrl?: string;
+    expired?: boolean;
+    svcTypes?: string[];
+    expMods?: string[];
+  } = {},
 ): string {
   createSession(REQUEST_NO);
   const certId = `S${randomUUID()}`;
@@ -20,9 +25,9 @@ function issuePending(
     transactionId: randomBytes(42).toString("base64url"),
     returnUrl: RETURN_URL,
     closeUrl: options.closeUrl,
-    svcTypes: ["M"],
+    svcTypes: options.svcTypes ?? ["M"],
     methodType,
-    expMods: [],
+    expMods: options.expMods ?? [],
     authUrlExpiresAt: Date.now() + (options.expired === true ? -1000 : 600000),
     status: "PENDING",
   });
@@ -300,6 +305,121 @@ describe("POST /ido/cert/request/:certId/complete", () => {
       });
       assert.equal(response.statusCode, 302);
       assert.equal(loadByRequestNo(REQUEST_NO)?.status, "SUCCESS");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("unknown certId -> 404", async () => {
+    const app = buildApp();
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/ido/cert/request/S00000000-0000-0000-0000-000000000000/complete",
+        payload: validJson(),
+      });
+      assert.equal(response.statusCode, 404);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("아이핀(I) 세션: svc_type=I 로 휴대폰 입력 없이 완료 -> authMethod 저장", async () => {
+    const app = buildApp();
+    try {
+      const certId = issuePending("GET", { svcTypes: ["I"] });
+      const response = await app.inject({
+        method: "POST",
+        url: `/ido/cert/request/${certId}/complete`,
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        payload: new URLSearchParams({
+          svc_type: "I",
+          name: "홍길동",
+          birthdate: "19000208",
+          gender: "1",
+          national_info: "0",
+        }).toString(),
+      });
+      assert.equal(response.statusCode, 302);
+      const stored = loadByRequestNo(REQUEST_NO);
+      assert.equal(stored?.status, "SUCCESS");
+      assert.equal(stored?.authMethod, "I");
+      assert.equal(stored?.identity?.mobileNo, "");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("svc_types 밖의 svc_type -> 400 (허용된 수단만 고를 수 있다)", async () => {
+    const app = buildApp();
+    try {
+      const certId = issuePending("GET", { svcTypes: ["M"] });
+      const response = await app.inject({
+        method: "POST",
+        url: `/ido/cert/request/${certId}/complete`,
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        payload: validForm({ svc_type: "I" }),
+      });
+      assert.equal(response.statusCode, 400);
+      assert.ok(response.body.includes("인증수단(svc_type)"));
+      assert.equal(loadByRequestNo(REQUEST_NO)?.status, "PENDING");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("svc_types 목록이 페이지 선택지가 된다 (M+I)", async () => {
+    const app = buildApp();
+    try {
+      const certId = issuePending("GET", { svcTypes: ["M", "I"] });
+      const response = await app.inject({ method: "GET", url: `/ido/cert/request/${certId}` });
+      assert.equal(response.statusCode, 200);
+      assert.ok(response.body.includes('<option value="M" selected>'), "first type is preselected");
+      assert.ok(response.body.includes('<option value="I">'), "all svc_types are selectable");
+      assert.equal(response.body.includes('<option value="U">'), false);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("?svc_type=I 로 아이핀을 골라 auto 완료할 수 있다", async () => {
+    const app = buildApp();
+    try {
+      const certId = issuePending("GET", { svcTypes: ["M", "I"] });
+      const response = await app.inject({
+        method: "GET",
+        url: `/ido/cert/request/${certId}?auto=1&svc_type=I`,
+      });
+      assert.equal(response.statusCode, 302);
+      assert.equal(loadByRequestNo(REQUEST_NO)?.authMethod, "I");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("exp_mods=closeButtonOn 이면 닫기 버튼을 노출한다", async () => {
+    const app = buildApp();
+    try {
+      const certId = issuePending("GET", { expMods: ["closeButtonOn"] });
+      const response = await app.inject({ method: "GET", url: `/ido/cert/request/${certId}` });
+      assert.equal(response.statusCode, 200);
+      assert.ok(response.body.includes('form="cancelForm"'), "closeButtonOn must render 닫기");
+      assert.ok(response.body.includes("closeButtonOn"), "page must echo exp_mods");
+      assert.ok(response.body.includes("인증 완료"));
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("exp_mods가 비면 닫기 버튼이 없다 (가이드: 닫기 버튼은 옵션)", async () => {
+    const app = buildApp();
+    try {
+      const certId = issuePending("GET", { expMods: [] });
+      const response = await app.inject({ method: "GET", url: `/ido/cert/request/${certId}` });
+      assert.equal(response.statusCode, 200);
+      assert.equal(response.body.includes('form="cancelForm"'), false);
+      assert.ok(response.body.includes("(없음)"), "page must show exp_mods as empty");
+      assert.ok(response.body.includes("인증 완료"));
     } finally {
       await app.close();
     }

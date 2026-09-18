@@ -61,6 +61,9 @@ export default async function routes(app: FastifyInstance): Promise<void> {
     if (!isValidRequestNo(body.request_no)) {
       return sendError(reply, "1002");
     }
+    // request_no 는 본인인증 흐름 전체를 잇는 키다. token 발급 때 만든 값을
+    // 그대로 써야 한다 (가이드 /auth/url 설명의 "token 값과 무관" 문구는 실
+    // 서비스 동작과 다르다).
     const requestNo = body.request_no;
     if (session.requestNo !== requestNo) {
       return sendError(reply, "1004");

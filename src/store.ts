@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { getDb } from "./db.ts";
-import type { Identity, Session, SessionStatus } from "./types.ts";
+import type { AuthMethod, Identity, Session, SessionStatus } from "./types.ts";
 
 // SQLite-backed session store for the NICE mock server.
 //
@@ -71,6 +71,7 @@ interface SessionRow {
   svc_types: string | null;
   method_type: string | null;
   exp_mods: string | null;
+  auth_method: string | null;
   status: string;
   identity: string | null;
   web_transaction_id: string | null;
@@ -127,6 +128,7 @@ function rowToSession(row: SessionRow): Session {
   if (row.method_type !== null) session.methodType = row.method_type;
   const expMods = parseStringArrayColumn("exp_mods", row.exp_mods);
   if (expMods !== undefined) session.expMods = expMods;
+  if (row.auth_method !== null) session.authMethod = row.auth_method as AuthMethod;
   const identity = parseIdentityColumn(row.identity);
   if (identity !== undefined) session.identity = identity;
   if (row.web_transaction_id !== null) session.webTransactionId = row.web_transaction_id;
@@ -183,7 +185,7 @@ export function createSession(requestNo: string, options?: CreateSessionOptions)
 }
 
 const SELECT_COLUMNS =
-  "request_no, client_id, access_token, ticket, iterators, token_expires_at, created_at, cert_id, transaction_id, auth_url_expires_at, return_url, close_url, svc_types, method_type, exp_mods, status, identity, web_transaction_id, fail_code, result_fetched_at";
+  "request_no, client_id, access_token, ticket, iterators, token_expires_at, created_at, cert_id, transaction_id, auth_url_expires_at, return_url, close_url, svc_types, method_type, exp_mods, auth_method, status, identity, web_transaction_id, fail_code, result_fetched_at";
 
 export function loadByRequestNo(requestNo: string): Session | undefined {
   const row = getDb()
@@ -233,6 +235,7 @@ export function updateSession(requestNo: string, patch: Partial<Session>): Sessi
     svcTypes: "svc_types",
     methodType: "method_type",
     expMods: "exp_mods",
+    authMethod: "auth_method",
     status: "status",
     identity: "identity",
     webTransactionId: "web_transaction_id",

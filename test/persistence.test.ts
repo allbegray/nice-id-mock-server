@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
 import { createClient, findClient, listClients, seedDefaultClientIfEmpty } from "../src/clients.ts";
 import { closeDb, getDb, initDb } from "../src/db.ts";
@@ -212,6 +213,45 @@ describe("restart persistence", () => {
       );
       assert.deepEqual(listClients(), []);
       assert.equal(findClient("seed-client-id"), undefined);
+    } finally {
+      cleanupDir(dir);
+    }
+  });
+
+  it("6. pre-existing DB without auth_method migrates additively", () => {
+    const { dir, file } = makeFileDb();
+    try {
+      // v0.1.2 sessions schema: no auth_method column.
+      const legacy = new DatabaseSync(file);
+      legacy.exec(
+        "CREATE TABLE sessions(request_no TEXT PRIMARY KEY, client_id TEXT NOT NULL, access_token TEXT NOT NULL UNIQUE, ticket TEXT NOT NULL, iterators INTEGER NOT NULL, token_expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL, cert_id TEXT UNIQUE, transaction_id TEXT, auth_url_expires_at INTEGER, return_url TEXT, close_url TEXT, svc_types TEXT, method_type TEXT, exp_mods TEXT, status TEXT NOT NULL CHECK(status IN ('CREATED','PENDING','SUCCESS','FAILED','CANCELLED')), identity TEXT, web_transaction_id TEXT, fail_code TEXT, result_fetched_at INTEGER)",
+      );
+      legacy
+        .prepare(
+          "INSERT INTO sessions(request_no, client_id, access_token, ticket, iterators, token_expires_at, created_at, status) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .run(
+          "LEGACY-REQ-000000000001",
+          "legacy-client",
+          "legacy.token.value",
+          "legacy-ticket",
+          66,
+          1700086400000,
+          1700000000000,
+          "CREATED",
+        );
+      legacy.close();
+
+      initDb(file);
+
+      const row = loadByRequestNo("LEGACY-REQ-000000000001");
+      assert.ok(row !== undefined, "legacy row must survive the migration");
+      assert.equal(row.authMethod, undefined);
+
+      // 새 컬럼은 ALTER TABLE로 추가되어 바로 쓸 수 있다.
+      const updated = updateSession("LEGACY-REQ-000000000001", { authMethod: "I" });
+      assert.equal(updated?.authMethod, "I");
+      assert.equal(loadByRequestNo("LEGACY-REQ-000000000001")?.authMethod, "I");
     } finally {
       cleanupDir(dir);
     }

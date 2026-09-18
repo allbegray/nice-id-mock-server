@@ -248,6 +248,13 @@ describe("session store", () => {
     assert.equal(updateSession("NO-SUCH-REQUEST", { status: "SUCCESS" }), undefined);
   });
 
+  it("round-trips authMethod", () => {
+    const session = makeSession(1700000000000);
+    updateSession(REQUEST_NO, { authMethod: "I" });
+    assert.equal(loadByRequestNo(REQUEST_NO)?.authMethod, "I");
+    assert.equal(loadByAccessToken(session.accessToken)?.authMethod, "I");
+  });
+
   it("certId lookup misses return undefined", () => {
     assert.equal(loadByCertId("S-missing"), undefined);
   });

@@ -221,19 +221,41 @@ describe("POST /ido/intc/v1.0/auth/url", () => {
     }
   });
 
-  it("request_no/token mismatch -> 400/1004", async () => {
+  it("request_no must be the token's value -> mismatch is 400/1004", async () => {
     const app = buildApp();
     try {
-      const sessionA = createSession(REQUEST_NO);
+      const session = createSession(REQUEST_NO);
       createSession(OTHER_REQUEST_NO);
       const response = await app.inject({
         method: "POST",
         url: "/ido/intc/v1.0/auth/url",
-        headers: { authorization: `Bearer ${sessionA.accessToken}` },
+        headers: { authorization: `Bearer ${session.accessToken}` },
         payload: validBody({ request_no: OTHER_REQUEST_NO }),
       });
       assert.equal(response.statusCode, 400);
       assert.equal((response.json() as Record<string, unknown>)["result_code"], "1004");
+      assert.equal(loadByRequestNo(REQUEST_NO)?.status, "CREATED");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("request_no is echoed back on success", async () => {
+    const app = buildApp();
+    try {
+      const session = createSession(REQUEST_NO);
+      const response = await app.inject({
+        method: "POST",
+        url: "/ido/intc/v1.0/auth/url",
+        headers: { authorization: `Bearer ${session.accessToken}` },
+        payload: validBody(),
+      });
+      assert.equal(response.statusCode, 200);
+      const body = response.json() as Record<string, unknown>;
+      assert.equal(body["request_no"], REQUEST_NO);
+      const stored = loadByRequestNo(REQUEST_NO);
+      assert.equal(stored?.status, "PENDING");
+      assert.equal(stored?.transactionId, body["transaction_id"]);
     } finally {
       await app.close();
     }

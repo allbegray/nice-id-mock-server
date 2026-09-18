@@ -38,6 +38,7 @@
     <dt>전달방식</dt><dd>{{METHOD_TYPE}}</dd>
     <dt>return_url</dt><dd>{{RETURN_URL}}</dd>
     <dt>close_url</dt><dd>{{CLOSE_URL_DISPLAY}}</dd>
+    <dt>exp_mods</dt><dd>{{EXP_MODS_DISPLAY}}</dd>
     <dt>남은 시간</dt><dd><span id="ttl" data-expires-at="{{EXPIRES_AT}}">{{TTL_SECONDS}}</span>초</dd>
   </dl>
 
@@ -51,6 +52,10 @@
   </div>
 
   <form id="completeForm" method="POST" action="/ido/cert/request/{{CERT_ID}}/complete">
+    <label for="svc_type">인증수단</label>
+    <select id="svc_type" name="svc_type">{{METHOD_OPTIONS}}</select>
+    <div class="hint">auth_url 요청의 svc_types 안에서만 고를 수 있다. 결과 필드가 수단에 따라 달라진다 (휴대폰만 통신사·번호 포함, 아이핀은 가상번호·연령코드 포함).</div>
+
     <label for="name">이름</label>
     <input type="text" id="name" name="name" value="{{NAME}}" autocomplete="off">
 
@@ -74,19 +79,20 @@
       </div>
     </div>
 
-    <label for="mobile_co">통신사</label>
-    <select id="mobile_co" name="mobile_co">
-      <option value="1" {{SEL_MOBILE_1}}>SKT (1)</option>
-      <option value="2" {{SEL_MOBILE_2}}>KT (2)</option>
-      <option value="3" {{SEL_MOBILE_3}}>LGU+ (3)</option>
-      <option value="5" {{SEL_MOBILE_5}}>SKT 알뜰폰 (5)</option>
-      <option value="6" {{SEL_MOBILE_6}}>KT 알뜰폰 (6)</option>
-      <option value="7" {{SEL_MOBILE_7}}>LGU+ 알뜰폰 (7)</option>
-    </select>
+    <div id="mobileFields">
+      <label for="mobile_co">통신사</label>
+      <select id="mobile_co" name="mobile_co">
+        <option value="1" {{SEL_MOBILE_1}}>SKT (1)</option>
+        <option value="2" {{SEL_MOBILE_2}}>KT (2)</option>
+        <option value="3" {{SEL_MOBILE_3}}>LGU+ (3)</option>
+        <option value="5" {{SEL_MOBILE_5}}>SKT 알뜰폰 (5)</option>
+        <option value="6" {{SEL_MOBILE_6}}>KT 알뜰폰 (6)</option>
+        <option value="7" {{SEL_MOBILE_7}}>LGU+ 알뜰폰 (7)</option>
+      </select>
 
-    <label for="mobile_no">휴대폰번호 (숫자만)</label>
-    <input type="text" id="mobile_no" name="mobile_no" value="{{MOBILE_NO}}" inputmode="numeric" maxlength="11">
-
+      <label for="mobile_no">휴대폰번호 (숫자만)</label>
+      <input type="text" id="mobile_no" name="mobile_no" value="{{MOBILE_NO}}" inputmode="numeric" maxlength="11">
+    </div>
     <label for="fail_code">오류 주입 (테스트용)</label>
     <select id="fail_code" name="fail_code">
       <option value="" {{SEL_FAIL_NONE}}>성공 (주입 없음)</option>
@@ -101,7 +107,7 @@
 
     <div class="actions">
       <button type="submit" class="primary">인증 완료</button>
-      <button type="submit" class="secondary" form="cancelForm">취소</button>
+      {{CLOSE_BUTTON}}
     </div>
   </form>
 
@@ -132,6 +138,17 @@
       setValue("mobile_no", p.mobile_no);
     });
   });
+
+  var methodSelect = document.getElementById("svc_type");
+  var mobileFields = document.getElementById("mobileFields");
+  function syncMobileFields() {
+    if (!methodSelect || !mobileFields) return;
+    mobileFields.style.display = methodSelect.value === "M" ? "" : "none";
+  }
+  if (methodSelect) {
+    methodSelect.addEventListener("change", syncMobileFields);
+    syncMobileFields();
+  }
 
   var ttlEl = document.getElementById("ttl");
   if (ttlEl) {

@@ -50,6 +50,26 @@ curl -s -X POST http://localhost:8899/ido/intc/v1.0/auth/result \
   -d "{\"request_no\":\"$REQ\",\"transaction_id\":\"$TXID\",\"web_transaction_id\":\"$WTID\"}"
 ```
 
+결과 조회의 `request_no` 는 **`/auth/token` 에서 만든 값** 을 그대로 쓴다. 흐름 전체가 같은 `request_no` 로 이어지므로 `/auth/url` 에 다른 값을 넣으면 `400/1004`, `/auth/result` 에 다른 값을 넣으면 `200/3029` 가 온다.
+
+```bash
+# 아이핀(svc_types I) 흐름: 같은 request_no 로 url -> 아이핀 전용 결과 필드
+IPIN=$(curl -s -X POST http://localhost:8899/ido/intc/v1.0/auth/url \
+  -H "Authorization: Bearer $ACCESS" \
+  -H 'Content-Type: application/json' \
+  -d "{\"request_no\":\"$REQ\",\"return_url\":\"http://localhost:8080/nice-id/return?requestNo=$REQ\",\"svc_types\":[\"I\"],\"method_type\":\"GET\"}")
+IPIN_AUTH=$(printf '%s' "$IPIN" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).auth_url")
+IPIN_TX=$(printf '%s' "$IPIN" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).transaction_id")
+IPIN_LOC=$(curl -s -o /dev/null -w '%{redirect_url}' "$IPIN_AUTH?auto=1")
+IPIN_WTID=${IPIN_LOC##*web_transaction_id=}
+curl -s -X POST http://localhost:8899/ido/intc/v1.0/auth/result \
+  -H "Authorization: Bearer $ACCESS" \
+  -H 'Content-Type: application/json' \
+  -d "{\"request_no\":\"$REQ\",\"transaction_id\":\"$IPIN_TX\",\"web_transaction_id\":\"$IPIN_WTID\"}"
+```
+
+`enc_data` 를 복호화하면 이번엔 `mobile_co`/`mobile_no` 대신 `ci_update`, `vnumber`, `age_code`, `auth_method` 가 들어 있다 ([docs/architecture.md](architecture.md)의 인증수단 표).
+
 ```bash
 REQ2="test-request-no-9876543210"
 TOKEN2=$(curl -s -X POST http://localhost:8899/ido/intc/v1.0/auth/token \

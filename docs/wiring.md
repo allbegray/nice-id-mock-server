@@ -41,7 +41,7 @@ class NiceIdReturnSampleController(
 }
 ```
 
-파라미터 이름은 `NiceIdService.authResult(requestNo, webTransactionId)` 시그니처와 같다. `method_type: POST` 인 경우 mock이 자동 제출 폼의 action에 원래 `return_url` (쿼리의 `requestNo` 포함)을 그대로 쓰므로, POST 본문의 `web_transaction_id` 와 쿼리의 `requestNo` 가 함께 도착한다. 그래서 GET/POST 두 변형 모두 같은 파라미터로 받으면 된다.
+파라미터 이름은 `NiceIdService.authResult(requestNo, webTransactionId)` 시그니처와 같다. 여기서 `requestNo` 는 **`/auth/token` 발급 때 만든 값** 이어야 한다 — request_no 는 흐름 전체를 잇는 키라서 `/auth/url`·`/auth/result` 모두 같은 값이어야 하고, 목은 다른 값을 `400/1004`(url) / `200/3029`(result) 로 거절한다. `method_type: POST` 인 경우 mock이 자동 제출 폼의 action에 원래 `return_url` (쿼리의 `requestNo` 포함)을 그대로 쓰므로, POST 본문의 `web_transaction_id` 와 쿼리의 `requestNo` 가 함께 도착한다. 그래서 GET/POST 두 변형 모두 같은 파라미터로 받으면 된다.
 
 ## 수동 테스트 시나리오
 

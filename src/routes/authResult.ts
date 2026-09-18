@@ -121,7 +121,7 @@ export default async function routes(app: FastifyInstance): Promise<void> {
       return sendError(reply, "1002");
     }
 
-    // 4. Session lookup by request_no.
+    // 4. Session lookup by request_no: token 발급 때 만든 값이 흐름 전체의 키다.
     const session = loadByRequestNo(requestNo);
     if (session === undefined) {
       return sendError(reply, "3029");
@@ -152,7 +152,9 @@ export default async function routes(app: FastifyInstance): Promise<void> {
     if (session.identity === undefined) {
       return sendError(reply, "3032");
     }
-    const json = JSON.stringify(buildResultJson(session.identity, session.clientId));
+    const json = JSON.stringify(
+      buildResultJson(session.identity, session.clientId, session.authMethod ?? "M"),
+    );
     const { encData, integrityValue } = encryptResult(json, {
       ticket: session.ticket,
       iterators: session.iterators,

@@ -3,11 +3,13 @@ import { describe, it } from "node:test";
 import type { Identity } from "../src/identity.ts";
 import {
   buildResultJson,
+  deriveAgeCode,
   deriveCi,
   deriveDi,
+  deriveVnumber,
   IDENTITY_PRESETS,
   normalizeIdentity,
-  RESULT_JSON_KEYS,
+  RESULT_JSON_KEYS_BY_METHOD,
   validateIdentity,
 } from "../src/identity.ts";
 
@@ -83,9 +85,9 @@ describe("identity", () => {
     assert.equal(deriveCi(nfdIdentity), deriveCi(BASE));
   });
 
-  it("buildResultJson emits exactly the snake_case key set", () => {
-    const json = buildResultJson(BASE, "client-a");
-    assert.deepEqual(Object.keys(json), [...RESULT_JSON_KEYS]);
+  it("buildResultJson emits exactly the 휴대폰인증 key set", () => {
+    const json = buildResultJson(BASE, "client-a", "M");
+    assert.deepEqual(Object.keys(json), [...RESULT_JSON_KEYS_BY_METHOD.M]);
     assert.deepEqual([...Object.keys(json)].sort(), [
       "birthdate",
       "ci",
@@ -107,10 +109,85 @@ describe("identity", () => {
     assert.equal(json.ci, deriveCi(BASE));
     assert.equal(json.di, deriveDi(BASE, "client-a"));
     assert.equal(JSON.stringify(json).includes("nationalInfo"), false);
+    // 아이핀 전용 필드는 휴대폰 결과에 없다.
+    assert.equal(Object.hasOwn(json, "vnumber"), false);
+    assert.equal(Object.hasOwn(json, "age_code"), false);
+  });
+
+  it("buildResultJson emits 아이핀 전용 필드 for the I method", () => {
+    const now = new Date(2026, 8, 19); // 2026-09-19
+    const json = buildResultJson(BASE, "client-a", "I", now);
+    assert.deepEqual(Object.keys(json), [...RESULT_JSON_KEYS_BY_METHOD.I]);
+    assert.equal(json.ci_update, "0");
+    assert.equal(json.auth_method, "5");
+    assert.ok(json.vnumber !== undefined && /^\d{10}$/.test(json.vnumber));
+    // 19000208 생일 → 126세 → 최고 구간.
+    assert.equal(json.age_code, "7");
+    // 휴대폰 전용 필드는 아이핀 결과에 없다.
+    assert.equal(Object.hasOwn(json, "mobile_co"), false);
+    assert.equal(Object.hasOwn(json, "mobile_no"), false);
+    // CI/DI는 수단과 무관하게 같은 규칙이다.
+    assert.equal(json.ci, deriveCi(BASE));
+    assert.equal(json.di, deriveDi(BASE, "client-a"));
+  });
+
+  it("buildResultJson emits only the common fields for 인증서 (F/U)", () => {
+    for (const method of ["F", "U"] as const) {
+      const json = buildResultJson(BASE, "client-a", method);
+      assert.deepEqual(Object.keys(json), [...RESULT_JSON_KEYS_BY_METHOD[method]]);
+      for (const key of ["mobile_co", "mobile_no", "vnumber", "age_code", "auth_method"]) {
+        assert.equal(Object.hasOwn(json, key), false, `${method} must omit ${key}`);
+      }
+      assert.equal(json.ci, deriveCi(BASE));
+    }
+  });
+
+  it("아이핀/인증서 결과는 휴대폰 입력 없이도 만들어진다", () => {
+    const noPhone: Identity = { ...BASE, mobileCo: "", mobileNo: "" };
+    // 휴대폰인증은 여전히 통신사·번호를 요구한다.
+    assert.throws(() => buildResultJson(noPhone, "client-a", "M"), /mobileCo/);
+    assert.throws(() => validateIdentity(noPhone), /mobileCo/);
+    assert.equal(buildResultJson(noPhone, "client-a", "I").vnumber?.length, 10);
+    assert.equal(buildResultJson(noPhone, "client-a", "U").name, "홍길동");
+    // 검증 옵션을 꺼도 공통 필드 검증은 그대로다.
+    assert.throws(
+      () => validateIdentity({ ...noPhone, name: "  " }, { requireMobile: false }),
+      /name/,
+    );
+  });
+
+  it("vnumber is deterministic per identity and stable across phone changes", () => {
+    assert.equal(deriveVnumber(BASE), deriveVnumber({ ...BASE }));
+    assert.equal(deriveVnumber(BASE), deriveVnumber({ ...BASE, mobileNo: "01099998888" }));
+    assert.notEqual(deriveVnumber(BASE), deriveVnumber({ ...BASE, name: "김영희" }));
+    assert.match(deriveVnumber(BASE), /^\d{10}$/);
+  });
+
+  it("age_code follows the guide bands (만 나이)", () => {
+    const now = new Date(2026, 8, 19); // 2026-09-19
+    const codes: readonly [string, string][] = [
+      ["20200101", "0"], // 6세
+      ["20150101", "1"], // 11세
+      ["20130101", "2"], // 13세
+      ["20120101", "3"], // 14세
+      ["20100101", "4"], // 16세
+      ["20080101", "5"], // 18세
+      ["20070101", "6"], // 19세
+      ["20060101", "7"], // 20세
+      ["19000208", "7"],
+    ];
+    for (const [birthdate, code] of codes) {
+      assert.equal(deriveAgeCode(birthdate, now), code, `birthdate=${birthdate}`);
+    }
+    // 생일 전날/당일 경계: 다음 날 생일이면 아직 한 살 어리다.
+    assert.equal(deriveAgeCode("20070920", now), "5");
+    assert.equal(deriveAgeCode("20070919", now), "6");
+    // 기본 인자(조회 시점)로도 계산된다.
+    assert.match(deriveAgeCode("19000208"), /^[0-7]$/);
   });
 
   it("birthdate is a yyyyMMdd string, never ISO", () => {
-    const json = buildResultJson(BASE, "client-a");
+    const json = buildResultJson(BASE, "client-a", "M");
     assert.match(json.birthdate, /^\d{8}$/);
     assert.equal(json.birthdate.includes("-"), false);
   });

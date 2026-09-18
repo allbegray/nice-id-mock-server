@@ -10,10 +10,10 @@ import {
   MOBILE_CO_CODES,
   NATIONAL_CODES,
   PRESET_ADULT_MALE,
-  RESULT_JSON_KEYS,
+  RESULT_JSON_KEYS_BY_METHOD,
 } from "../src/identity.ts";
 import { createSession, loadByRequestNo, updateSession } from "../src/store.ts";
-import type { SessionStatus } from "../src/types.ts";
+import type { AuthMethod, Identity, SessionStatus } from "../src/types.ts";
 import { closeTestDb, initTestDb } from "./helpers/testDb.ts";
 
 const PATH = "/ido/intc/v1.0/auth/result";
@@ -40,6 +40,8 @@ function seedSession(
     authUrlExpiresAt?: number;
     webTransactionId?: string;
     tokenTtlMs?: number;
+    authMethod?: AuthMethod;
+    identity?: Identity;
   } = {},
 ): Seeded {
   const created = createSession(requestNo, { tokenTtlMs: overrides.tokenTtlMs });
@@ -49,8 +51,9 @@ function seedSession(
     transactionId,
     authUrlExpiresAt: overrides.authUrlExpiresAt ?? Date.now() + 600000,
     status: overrides.status ?? "SUCCESS",
-    identity: { ...PRESET_ADULT_MALE },
+    identity: { ...(overrides.identity ?? PRESET_ADULT_MALE) },
     webTransactionId,
+    ...(overrides.authMethod !== undefined ? { authMethod: overrides.authMethod } : {}),
     ...(overrides.failCode !== undefined ? { failCode: overrides.failCode } : {}),
   });
   assert.ok(updated !== undefined);
@@ -126,7 +129,7 @@ describe("POST /ido/intc/v1.0/auth/result", () => {
         body["integrity_value"] as string,
       );
       const parsed = JSON.parse(plaintext) as Record<string, unknown>;
-      assert.deepEqual([...Object.keys(parsed)].sort(), [...RESULT_JSON_KEYS].sort());
+      assert.deepEqual([...Object.keys(parsed)].sort(), [...RESULT_JSON_KEYS_BY_METHOD.M].sort());
       assert.equal(parsed["name"], "홍길동");
       assert.equal(parsed["mobile_no"], "01012345678");
       assert.equal((parsed["ci"] as string).length, 86);
@@ -153,6 +156,61 @@ describe("POST /ido/intc/v1.0/auth/result", () => {
       });
       assert.equal(response.statusCode, 200);
       assert.equal((response.json() as Record<string, unknown>)["result_code"], "0000");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("payload fields follow the completed auth method (M/I/U)", async () => {
+    const app = buildApp();
+    try {
+      const noPhone: Identity = { ...PRESET_ADULT_MALE, mobileCo: "", mobileNo: "" };
+      const cases: readonly [AuthMethod, Identity][] = [
+        ["M", PRESET_ADULT_MALE],
+        ["I", noPhone],
+        ["U", noPhone],
+      ];
+      for (const [method, identity] of cases) {
+        const requestNo = `REQ${method}METHOD0123456789012`;
+        assert.ok(requestNo.length >= 20 && requestNo.length <= 50);
+        const seed = seedSession(requestNo, { authMethod: method, identity });
+        const response = await app.inject({
+          method: "POST",
+          url: PATH,
+          headers: { authorization: `Bearer ${seed.accessToken}` },
+          payload: {
+            web_transaction_id: seed.webTransactionId,
+            transaction_id: seed.transactionId,
+            request_no: requestNo,
+          },
+        });
+        assert.equal(response.statusCode, 200, `method=${method}`);
+        const body = response.json() as Record<string, unknown>;
+        assert.equal(body["result_code"], "0000", `method=${method}`);
+        const parsed = JSON.parse(
+          decryptForTest(
+            seed.ticket,
+            seed.iterators,
+            seed.transactionId,
+            body["enc_data"] as string,
+            body["integrity_value"] as string,
+          ),
+        ) as Record<string, unknown>;
+        assert.deepEqual(
+          [...Object.keys(parsed)].sort(),
+          [...RESULT_JSON_KEYS_BY_METHOD[method]].sort(),
+          `method=${method}`,
+        );
+        // CI/DI는 수단과 무관하게 같은 규칙으로 계산된다.
+        assert.equal(parsed["ci"], deriveCi(identity), `method=${method}`);
+        assert.equal(parsed["di"], deriveDi(identity, "test-client-id"), `method=${method}`);
+        if (method === "I") {
+          assert.match(parsed["vnumber"] as string, /^\d{10}$/);
+          assert.match(parsed["age_code"] as string, /^[0-7]$/);
+          assert.equal(parsed["auth_method"], "5");
+          assert.equal(parsed["ci_update"], "0");
+        }
+      }
     } finally {
       await app.close();
     }

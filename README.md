@@ -84,7 +84,21 @@ docker compose up -d
 | `POST` | `/ido/cert/request/:certId/complete` | 없음 (폼 제출) | 성공 전달, 또는 입력 오류 시 400 폼 재표시 |
 | `POST` | `/ido/cert/request/:certId/cancel` | 없음 (취소) | `close_url` 있으면 302, 없으면 취소 안내 페이지 |
 
+`request_no`는 본인인증 흐름 전체를 잇는 키다. `/auth/token`에서 만든 값을 `/auth/url`과 `/auth/result`에 그대로 쓴다. 값이 어긋나면 `/auth/url`은 `400/1004`, `/auth/result`는 `200/3029`다. (가이드 웹 문서의 `/auth/url` 항목에는 "token 요청값과 무관"이라고 적혀 있지만 실제 서비스 동작과 다르다.) 같은 토큰으로 `/auth/url`을 다시 부르면 이전 인증창(`certId`, `transaction_id`)은 무효가 된다(회전).
+
+표준창의 인증수단 선택지는 `/auth/url`이 지정한 `svc_types`(M 휴대폰, F 금융인증서, U 공동인증서, I 아이핀)로 제한된다. 결과 필드는 완료한 수단을 따른다: M은 `mobile_co`/`mobile_no`, I는 `ci_update`/`vnumber`/`age_code`/`auth_method`, F/U는 공통 필드(`name`, `birthdate`, `gender`, `national_info`, `ci`, `di`)만. 닫기 버튼은 `exp_mods`에 `closeButtonOn`이 있을 때만 노출된다.
+
 성공 전달 방식은 `method_type` 에 따라 다르다. `GET` 이면 `return_url` 에 `web_transaction_id` 를 쿼리로 합쳐 302 리다이렉트한다 (기존 `requestNo` 쿼리는 유지된다). `POST` 면 숨은 `web_transaction_id` 필드를 담은 자동 제출 폼 HTML 200을 돌려준다.
+
+## 실 NICE 가이드와 다른 점 (목 한계)
+
+계약은 가이드(<https://auth-guide.niceid.co.kr>)를 따르고, 아래는 목이 일부러 다르게 가는 지점이다. 실 서비스로 넘어갈 때 여기만 보면 된다.
+
+- **결과 1회 제공**: 실 서비스는 같은 트랜잭션을 다시 조회하면 `3033`(기 인증결과 제공 건)을 준다. 목 기본값은 재조회를 허용하고, `STRICT_ONE_TIME_RESULT=true`로 재현한다.
+- **CI/DI 형식**: 목은 SHA-512 base64url 무패딩 86자를 결정적으로 만든다. 실 서비스 CI는 88byte, DI는 64byte(가이드 샘플 주석)라서 길이를 검증하는 코드가 목에서 먼저 걸린다. 값 자체는 실 서비스와 무관하다.
+- **아이핀 전용 값**: `vnumber`(10자리)와 `age_code`(만 나이 구간)는 목이 신원에서 결정적으로 유도한다(`deriveVnumber`, `deriveAgeCode`). `ci_update`는 항상 `0`, `auth_method`는 항상 `5`.
+- **게이트웨이 계층**: Outbound IP 등록, 유량 제한, `X-Intc-DevLang` 검증은 없다. 없는 경로는 NICE `1010`이 아니라 Fastify 기본 404를 준다.
+- **표준창 UI**: 실제 인증수단(휴대폰/인증서/아이핀) 대신 로컬 폼으로 신원을 입력한다. 수단 선택과 결과 필드 구성만 실 서비스와 같다.
 
 ## CI/DI 생성 규칙
 

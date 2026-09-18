@@ -3,18 +3,41 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { readCertHtml } from "../app.ts";
 import { loadConfig } from "../config.ts";
 import type { IdentityLike } from "../identity.ts";
-import { normalizeIdentity, validateIdentity } from "../identity.ts";
+import { isAuthMethod, normalizeIdentity, validateIdentity } from "../identity.ts";
 import { isAuthWindowExpired, loadByCertId, updateSession } from "../store.ts";
-import type { Identity, Session } from "../types.ts";
+import type { AuthMethod, Identity, Session } from "../types.ts";
 
 const FAIL_CODE_PATTERN = /^3\d{3}$/;
 
+const METHOD_LABELS: Record<AuthMethod, string> = {
+  M: "휴대폰 본인확인 (M)",
+  F: "금융인증서 (F)",
+  U: "공동인증서 (U)",
+  I: "아이핀 (I)",
+};
+
+// 표준창은 /auth/url 이 지정한 svc_types 안에서만 인증수단을 고를 수 있다.
+function allowedMethods(session: Session): AuthMethod[] {
+  return (session.svcTypes ?? []).filter(isAuthMethod);
+}
+
+function methodSelectHtml(methods: AuthMethod[], current: AuthMethod | undefined): string {
+  return methods
+    .map((method) => {
+      const isSelected = method === current ? " selected" : "";
+      return `<option value="${method}"${isSelected}>${METHOD_LABELS[method]}</option>`;
+    })
+    .join("");
+}
+
 interface CompleteBody extends IdentityLike {
+  svc_type?: unknown;
   fail_code?: unknown;
   fail_code_custom?: unknown;
 }
 
 interface FormValues {
+  method: string;
   name: string;
   birthdate: string;
   gender: string;
@@ -27,6 +50,7 @@ interface FormValues {
 
 function defaultFormValues(): FormValues {
   return {
+    method: "",
     name: "",
     birthdate: "19000208",
     gender: "1",
@@ -83,6 +107,23 @@ function extractFailCode(body: CompleteBody, query: Record<string, unknown>): st
 
 function isFailCode(value: string): boolean {
   return FAIL_CODE_PATTERN.test(value);
+}
+
+type MethodResolution =
+  | { method: AuthMethod; error?: undefined }
+  | { method?: undefined; error: string };
+
+// 요청한 인증수단이 없으면 svc_types의 첫 값이 기본, 목록 밖의 값이면 오류.
+function resolveMethod(session: Session, requested: unknown): MethodResolution {
+  const methods = allowedMethods(session);
+  const fallback = methods[0];
+  if (requested === undefined || requested === null || requested === "") {
+    return fallback === undefined ? { error: "허용된 인증수단이 없습니다" } : { method: fallback };
+  }
+  if (isAuthMethod(requested) && methods.includes(requested)) {
+    return { method: requested };
+  }
+  return { error: `인증수단(svc_type) 값이 올바르지 않습니다: ${String(requested)}` };
 }
 
 function notFoundPage(): string {
@@ -152,7 +193,16 @@ function formVars(
     errorMessage === undefined || errorMessage === ""
       ? ""
       : `<div class="error" role="alert"><strong>입력 정보를 확인해 주세요.</strong><br>${escapeHtml(errorMessage)}</div>`;
+  const methods = allowedMethods(session);
+  const requested = isAuthMethod(values.method) ? values.method : undefined;
+  const closeButtonOn = (session.expMods ?? []).includes("closeButtonOn");
   return {
+    "{{METHOD_OPTIONS}}": methodSelectHtml(methods, requested ?? methods[0]),
+    "{{EXP_MODS_DISPLAY}}": escapeHtml((session.expMods ?? []).join(", ") || "(없음)"),
+    // 가이드: 표준창 닫기 버튼은 exp_mods=closeButtonOn 일 때만 노출된다.
+    "{{CLOSE_BUTTON}}": closeButtonOn
+      ? `<button type="submit" class="secondary" form="cancelForm">닫기</button>`
+      : "",
     "{{CERT_ID}}": escapeHtml(session.certId ?? ""),
     "{{REQUEST_NO}}": escapeHtml(session.requestNo),
     "{{SVC_TYPES}}": escapeHtml((session.svcTypes ?? []).join(",")),
@@ -202,6 +252,7 @@ async function sendForm(
   session: Session,
   values: FormValues,
   errorMessage?: string,
+  statusCode = 200,
 ): Promise<FastifyReply> {
   const html = await renderFormHtml(session, values, errorMessage);
   if (html === undefined) {
@@ -211,7 +262,7 @@ async function sendForm(
       .type("text/html; charset=utf-8")
       .send(`<h1>표준창 템플릿을 찾을 수 없습니다${detail}</h1>`);
   }
-  return reply.type("text/html; charset=utf-8").send(html);
+  return reply.code(statusCode).type("text/html; charset=utf-8").send(html);
 }
 
 function newWebTransactionId(): string {
@@ -254,11 +305,24 @@ export default async function routes(app: FastifyInstance): Promise<void> {
       return reply.type("text/html; charset=utf-8").send(failurePage(updated ?? session, failCode));
     }
 
+    const resolved = resolveMethod(session, query["svc_type"]);
+    if (resolved.error !== undefined) {
+      return sendForm(
+        reply,
+        session,
+        { ...defaultFormValues(), method: asTrimmed(query["svc_type"]) },
+        resolved.error,
+        400,
+      );
+    }
+    const method = resolved.method;
+
     if (query["auto"] === "1") {
       const defaultIdentity: Identity = { ...loadConfig().defaultIdentity };
       const updated = updateSession(session.requestNo, {
         status: "SUCCESS",
         identity: defaultIdentity,
+        authMethod: method,
         webTransactionId: newWebTransactionId(),
         failCode: undefined,
       });
@@ -268,7 +332,7 @@ export default async function routes(app: FastifyInstance): Promise<void> {
       return deliverSuccess(reply, updated);
     }
 
-    return sendForm(reply, session, defaultFormValues());
+    return sendForm(reply, session, { ...defaultFormValues(), method });
   });
 
   app.post("/ido/cert/request/:certId/complete", async (request, reply) => {
@@ -286,12 +350,24 @@ export default async function routes(app: FastifyInstance): Promise<void> {
     }
 
     let identity: Identity;
+    const resolved = resolveMethod(session, body.svc_type ?? query["svc_type"]);
+    if (resolved.error !== undefined) {
+      return sendForm(
+        reply,
+        session,
+        { ...defaultFormValues(), method: asTrimmed(body.svc_type ?? query["svc_type"]) },
+        resolved.error,
+        400,
+      );
+    }
+    const method = resolved.method;
     try {
-      identity = validateIdentity(body);
+      identity = validateIdentity(body, { requireMobile: method === "M" });
     } catch (err) {
       const sticky = normalizeIdentity(body);
       const detail = err instanceof Error ? err.message : "입력값이 올바르지 않습니다";
       const values: FormValues = {
+        method,
         name: sticky.name,
         birthdate: sticky.birthdate,
         gender: sticky.gender,
@@ -301,19 +377,13 @@ export default async function routes(app: FastifyInstance): Promise<void> {
         failCode: asTrimmed(body.fail_code) === "custom" ? "custom" : "",
         failCustom: asTrimmed(body.fail_code_custom),
       };
-      const html = await renderFormHtml(session, values, `입력 오류: ${detail}`);
-      if (html === undefined) {
-        return reply
-          .code(400)
-          .type("text/html; charset=utf-8")
-          .send(`<h1>입력 정보를 확인해 주세요. 입력 오류: ${escapeHtml(detail)}</h1>`);
-      }
-      return reply.code(400).type("text/html; charset=utf-8").send(html);
+      return sendForm(reply, session, values, `입력 오류: ${detail}`, 400);
     }
 
     const updated = updateSession(session.requestNo, {
       status: "SUCCESS",
       identity,
+      authMethod: method,
       webTransactionId: newWebTransactionId(),
       failCode: undefined,
     });

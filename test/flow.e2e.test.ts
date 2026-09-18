@@ -7,7 +7,12 @@ import { createClient } from "../src/clients.ts";
 import { loadConfig } from "../src/config.ts";
 import { decryptForTest } from "../src/crypto.ts";
 import { getDb } from "../src/db.ts";
-import { buildResultJson, deriveCi, deriveDi, RESULT_JSON_KEYS } from "../src/identity.ts";
+import {
+  buildResultJson,
+  deriveCi,
+  deriveDi,
+  RESULT_JSON_KEYS_BY_METHOD,
+} from "../src/identity.ts";
 import { loadByAccessToken, loadByCertId, loadByRequestNo } from "../src/store.ts";
 import type { ReturnCatcher } from "./helpers/returnCatcher.ts";
 import { startReturnCatcher } from "./helpers/returnCatcher.ts";
@@ -129,6 +134,7 @@ async function issueUrl(
   requestNo: string,
   returnUrl: string,
   methodType: string,
+  svcTypes: readonly string[] = ["M"],
 ): Promise<UrlIssued> {
   const res = await fetch(`${baseUrl}/ido/intc/v1.0/auth/url`, {
     method: "POST",
@@ -136,7 +142,7 @@ async function issueUrl(
     body: JSON.stringify({
       request_no: requestNo,
       return_url: returnUrl,
-      svc_types: ["M"],
+      svc_types: [...svcTypes],
       method_type: methodType,
     }),
   });
@@ -180,7 +186,7 @@ async function followRedirectToCatcher(location: string, catcher: ReturnCatcher)
 
 function assertIdentityPayload(plaintext: string, clientId: string): void {
   const parsed = JSON.parse(plaintext) as Record<string, unknown>;
-  assert.deepEqual([...Object.keys(parsed)].sort(), [...RESULT_JSON_KEYS].sort());
+  assert.deepEqual([...Object.keys(parsed)].sort(), [...RESULT_JSON_KEYS_BY_METHOD.M].sort());
   assert.equal(parsed["name"], "홍길동");
   assert.equal(parsed["birthdate"], "19000208");
   assert.equal(parsed["gender"], "1");
@@ -381,6 +387,59 @@ describe("full-flow e2e with return_url catcher", () => {
         reqStr(result.body, "integrity_value"),
       );
       assertIdentityPayload(plaintext, "test-client-id");
+    } finally {
+      await catcher.close();
+      await app.close();
+    }
+  });
+
+  it("아이핀(svc_types I): 결과가 아이핀 필드만 담는다", async () => {
+    const { app, baseUrl } = await startApp();
+    const catcher = await startReturnCatcher();
+    try {
+      // request_no 는 token 에서 만든 값을 url/result 까지 그대로 쓴다.
+      const requestNo = newRequestNo("REQE2EIPIN");
+      const returnUrl = `${catcher.baseUrl}/nice-id/return?requestNo=${requestNo}`;
+      const token = await issueToken(baseUrl, requestNo);
+      const issued = await issueUrl(baseUrl, token.accessToken, requestNo, returnUrl, "GET", ["I"]);
+
+      const pageRes = await fetch(`${issued.authUrl}?auto=1`, { redirect: "manual" });
+      assert.equal(pageRes.status, 302);
+      const location = pageRes.headers.get("location");
+      await pageRes.text();
+      assert.ok(location !== null && location !== "", "302 must carry a Location");
+      const webTransactionId = await followRedirectToCatcher(location, catcher);
+      const caught = catcher.requests[catcher.requests.length - 1];
+      assert.ok(caught !== undefined);
+      assert.equal(caught.query["requestNo"] ?? "", requestNo);
+
+      const result = await callResult(
+        baseUrl,
+        token.accessToken,
+        requestNo,
+        issued.transactionId,
+        webTransactionId,
+      );
+      assert.equal(result.status, 200);
+      assert.equal(result.body["result_code"], "0000");
+      const parsed = JSON.parse(
+        decryptForTest(
+          token.ticket,
+          token.iterators,
+          issued.transactionId,
+          reqStr(result.body, "enc_data"),
+          reqStr(result.body, "integrity_value"),
+        ),
+      ) as Record<string, unknown>;
+      assert.deepEqual([...Object.keys(parsed)].sort(), [...RESULT_JSON_KEYS_BY_METHOD.I].sort());
+      assert.equal(reqStr(parsed, "name"), "홍길동");
+      assert.match(reqStr(parsed, "vnumber"), /^\d{10}$/);
+      assert.match(reqStr(parsed, "age_code"), /^[0-7]$/);
+      assert.equal(reqStr(parsed, "auth_method"), "5");
+      assert.equal(reqStr(parsed, "ci_update"), "0");
+      assert.equal(Object.hasOwn(parsed, "mobile_no"), false);
+
+      assert.equal(loadByRequestNo(requestNo)?.authMethod, "I");
     } finally {
       await catcher.close();
       await app.close();
@@ -867,7 +926,7 @@ describe("full-flow e2e with return_url catcher", () => {
       assert.equal(loadByCertId(certId)?.clientId, "client-b");
       const identity = reloaded.identity;
       assert.ok(identity !== undefined);
-      const expected = buildResultJson(identity, "client-b");
+      const expected = buildResultJson(identity, "client-b", "M");
       const after = await callResult(
         baseUrl,
         token.accessToken,

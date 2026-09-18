@@ -73,8 +73,11 @@ export default async function routes(app: FastifyInstance): Promise<void> {
     let clientId: string;
     let clientSecret: string;
     try {
-      const raw = Buffer.from(token, "base64url");
-      if (raw.length === 0 || raw.toString("base64url") !== token) {
+      // 가이드 표준은 base64url 무패딩이지만, 가이드 Node.js 샘플처럼 표준
+      // base64(+/)로 보내는 클라이언트도 같은 값으로 받아준다.
+      const normalized = token.replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+      const raw = Buffer.from(normalized, "base64url");
+      if (raw.length === 0 || raw.toString("base64url") !== normalized) {
         return sendError(reply, "1001");
       }
       const decoded = raw.toString("utf8");

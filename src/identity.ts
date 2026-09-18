@@ -1,7 +1,16 @@
 import { createHash } from "node:crypto";
-import type { Identity } from "./types.ts";
+import type { AuthMethod, Identity } from "./types.ts";
 
-export type { Identity } from "./types.ts";
+export type { AuthMethod, Identity } from "./types.ts";
+
+// 표준창 인증수단 코드 (svc_types 원소). 결과 필드 구성이 이 값에 따라
+// 달라진다: M 휴대폰 → mobile_co/mobile_no, I 아이핀 → ci_update/vnumber/
+// age_code/auth_method, F 금융인증서·U 공동인증서 → 공통 필드만.
+export const AUTH_METHODS: readonly AuthMethod[] = ["M", "F", "I", "U"];
+
+export function isAuthMethod(value: unknown): value is AuthMethod {
+  return typeof value === "string" && (AUTH_METHODS as readonly string[]).includes(value);
+}
 
 // Allowlist mirrors the client enums: Gender.kt (0/1), National.kt (0/1),
 // MobileCo.kt (1/2/3/5/6/7 — NEVER 4). The client's `of()` throws
@@ -61,9 +70,15 @@ export function normalizeIdentity(input: IdentityLike): Identity {
   };
 }
 
+export interface ValidateIdentityOptions {
+  // 휴대폰인증(M)일 때만 통신사·번호가 결과에 실리므로, 아이핀/인증서
+  // 경로에서는 검증을 건너뛴다.
+  requireMobile?: boolean;
+}
+
 // Validate and return the normalized identity. Throws an Error naming the
 // offending field when any rule fails.
-export function validateIdentity(input: unknown): Identity {
+export function validateIdentity(input: unknown, options: ValidateIdentityOptions = {}): Identity {
   if (typeof input !== "object" || input === null) {
     throw new Error("identity must be an object");
   }
@@ -84,11 +99,13 @@ export function validateIdentity(input: unknown): Identity {
   if (!NATIONAL_CODES.includes(normalized.nationalInfo)) {
     throw new Error('nationalInfo must be "0" or "1"');
   }
-  if (!MOBILE_CO_CODES.includes(normalized.mobileCo)) {
-    throw new Error('mobileCo must be one of "1", "2", "3", "5", "6", "7"');
-  }
-  if (!/^\d{10,11}$/.test(normalized.mobileNo)) {
-    throw new Error("mobileNo must be 10-11 digits");
+  if (options.requireMobile ?? true) {
+    if (!MOBILE_CO_CODES.includes(normalized.mobileCo)) {
+      throw new Error('mobileCo must be one of "1", "2", "3", "5", "6", "7"');
+    }
+    if (!/^\d{10,11}$/.test(normalized.mobileNo)) {
+      throw new Error("mobileNo must be 10-11 digits");
+    }
   }
   return normalized;
 }
@@ -159,6 +176,53 @@ export function deriveDi(identity: Identity, clientId: string): string {
   return digestBase64UrlNoPad(preimage);
 }
 
+// 아이핀 전용 필드. 실 서비스 값은 계약/아이핀 계정에 달려 있으므로 mock은
+// 같은 입력에 항상 같은 값이 나오도록 유도한다 (CI/DI와 같은 결정성 규칙).
+// vnumber: 프리이미지 sha256 다이제스트에서 십진수 10자리.
+// Mock limitation: 값 형식(10자리 숫자)만 실 서비스와 맞춘다.
+export function deriveVnumber(identity: Identity): string {
+  const digest = createHash("sha256")
+    .update(
+      `nice-mock-vn|${identity.name}|${identity.birthdate}|${identity.gender}|${identity.nationalInfo}`,
+      "utf8",
+    )
+    .digest();
+  let value = "";
+  for (const byte of digest) {
+    value += String(byte % 10);
+    if (value.length === 10) break;
+  }
+  return value;
+}
+
+// 아이핀 전용 age_code. 구간은 가이드 표 그대로:
+// 0: 9세미만, 1: 9~12세미만, 2: 12~14세미만, 3: 14~15세미만,
+// 4: 15~18세미만, 5: 18~19세미만, 6: 19~20세미만, 7: 20세이상.
+// 만 나이(로컬 시간) 기준이라 조회 시점에 따라 값이 달라진다.
+const AGE_CODE_LIMITS: readonly (readonly [number, string])[] = [
+  [9, "0"],
+  [12, "1"],
+  [14, "2"],
+  [15, "3"],
+  [18, "4"],
+  [19, "5"],
+  [20, "6"],
+];
+
+export function deriveAgeCode(birthdate: string, now: Date = new Date()): string {
+  const year = Number(birthdate.slice(0, 4));
+  const month = Number(birthdate.slice(4, 6));
+  const day = Number(birthdate.slice(6, 8));
+  const monthNow = now.getMonth() + 1;
+  const dayNow = now.getDate();
+  const beforeBirthday = monthNow < month || (monthNow === month && dayNow < day);
+  const age = now.getFullYear() - year - (beforeBirthday ? 1 : 0);
+  for (const [limit, code] of AGE_CODE_LIMITS) {
+    if (age < limit) return code;
+  }
+  return "7";
+}
+
 export interface ResultJson {
   name: string;
   birthdate: string;
@@ -166,34 +230,60 @@ export interface ResultJson {
   national_info: string;
   ci: string;
   di: string;
-  mobile_co: string;
-  mobile_no: string;
+  ci_update?: string;
+  mobile_co?: string;
+  mobile_no?: string;
+  vnumber?: string;
+  age_code?: string;
+  auth_method?: string;
 }
 
-export const RESULT_JSON_KEYS: readonly string[] = [
-  "name",
-  "birthdate",
-  "gender",
-  "national_info",
-  "ci",
-  "di",
-  "mobile_co",
-  "mobile_no",
-];
+// 복호화 후 JSON의 키 집합. 순서는 가이드 결과 표를 따른다.
+export const RESULT_JSON_KEYS_BY_METHOD: Record<AuthMethod, readonly string[]> = {
+  M: ["name", "birthdate", "gender", "national_info", "ci", "di", "mobile_co", "mobile_no"],
+  I: [
+    "name",
+    "birthdate",
+    "gender",
+    "national_info",
+    "ci",
+    "di",
+    "ci_update",
+    "vnumber",
+    "age_code",
+    "auth_method",
+  ],
+  F: ["name", "birthdate", "gender", "national_info", "ci", "di"],
+  U: ["name", "birthdate", "gender", "national_info", "ci", "di"],
+};
 
-// Emit EXACTLY the snake_case result fields. Nullable AuthResultData fields
-// (ci2, ci_update, vnumber, age_code, auth_method) are omitted. The
-// identity is validated first so no code outside the allowlists is emitted.
-export function buildResultJson(identity: Identity, clientId: string): ResultJson {
-  const valid = validateIdentity(identity);
-  return {
+// Emit EXACTLY the snake_case fields of the completed auth method. Nullable
+// AuthResultData fields (ci2) are omitted, like the real service omits
+// anything not contracted. The identity is validated first so no code
+// outside the allowlists is emitted.
+export function buildResultJson(
+  identity: Identity,
+  clientId: string,
+  authMethod: AuthMethod,
+  now: Date = new Date(),
+): ResultJson {
+  const valid = validateIdentity(identity, { requireMobile: authMethod === "M" });
+  const json: ResultJson = {
     name: valid.name,
     birthdate: valid.birthdate,
     gender: valid.gender,
     national_info: valid.nationalInfo,
     ci: deriveCi(valid),
     di: deriveDi(valid, clientId),
-    mobile_co: valid.mobileCo,
-    mobile_no: valid.mobileNo,
   };
+  if (authMethod === "M") {
+    json.mobile_co = valid.mobileCo;
+    json.mobile_no = valid.mobileNo;
+  } else if (authMethod === "I") {
+    json.ci_update = "0";
+    json.vnumber = deriveVnumber(valid);
+    json.age_code = deriveAgeCode(valid.birthdate, now);
+    json.auth_method = "5";
+  }
+  return json;
 }
