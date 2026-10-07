@@ -12,16 +12,16 @@ A local mock server for NICE identity verification (token → standard window �
 ## Docker로 실행
 
 ```bash
-docker pull allbegray/nice-id-mock-server:v0.1.3
+docker pull allbegray/nice-id-mock-server:v0.2.0
 ```
 
 ```bash
-docker run -d -p 127.0.0.1:8899:8899 -e PUBLIC_BASE_URL=http://localhost:8899 -v niceid-data:/app/data allbegray/nice-id-mock-server:v0.1.3
+docker run -d -p 127.0.0.1:8899:8899 -e PUBLIC_BASE_URL=http://localhost:8899 -v niceid-data:/app/data allbegray/nice-id-mock-server:v0.2.0
 curl -s http://localhost:8899/health
 ```
 
 - Docker Hub: https://hub.docker.com/r/allbegray/nice-id-mock-server
-- GHCR 미러: `ghcr.io/allbegray/nice-id-mock-server` (`docker pull ghcr.io/allbegray/nice-id-mock-server:v0.1.3`)
+- GHCR 미러: `ghcr.io/allbegray/nice-id-mock-server` (`docker pull ghcr.io/allbegray/nice-id-mock-server:v0.2.0`)
 
 태그 정책: `latest`는 최신 릴리즈, `vX.Y.Z`는 고정 핀이다. 재현이 필요하면 버전을 찍어 쓴다.
 
@@ -34,7 +34,7 @@ curl -s http://localhost:8899/health
 ```yaml
 services:
   nice-id-mock-server:
-    image: allbegray/nice-id-mock-server:v0.1.3
+    image: allbegray/nice-id-mock-server:v0.2.0
     container_name: nice-id-mock-server
     ports:
       - "127.0.0.1:8899:8899"

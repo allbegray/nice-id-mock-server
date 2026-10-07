@@ -8,13 +8,13 @@ Bun + SQLite 영속화로 로컬에서 바로 실행된다.
 이미지 받기:
 
 ```bash
-docker pull allbegray/nice-id-mock-server:v0.1.3
+docker pull allbegray/nice-id-mock-server:v0.2.0
 ```
 
 컨테이너 실행 후 상태 확인:
 
 ```bash
-docker run -d -p 127.0.0.1:8899:8899 -e PUBLIC_BASE_URL=http://localhost:8899 -v niceid-data:/app/data allbegray/nice-id-mock-server:v0.1.3
+docker run -d -p 127.0.0.1:8899:8899 -e PUBLIC_BASE_URL=http://localhost:8899 -v niceid-data:/app/data allbegray/nice-id-mock-server:v0.2.0
 curl -s http://localhost:8899/health
 ```
 
@@ -27,7 +27,7 @@ curl -s http://localhost:8899/health
 ```yaml
 services:
   nice-id-mock-server:
-    image: allbegray/nice-id-mock-server:v0.1.3
+    image: allbegray/nice-id-mock-server:v0.2.0
     container_name: nice-id-mock-server
     ports:
       - "127.0.0.1:8899:8899"
