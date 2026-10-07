@@ -1,6 +1,6 @@
 # NICE 본인인증 목 서버 (nice-id-mock-server)
 
-A local mock server for NICE identity verification (token → standard window → encrypted result) so you can develop the full flow without the real NICE service. Node 26 + SQLite persistence.
+A local mock server for NICE identity verification (token → standard window → encrypted result) so you can develop the full flow without the real NICE service. Bun + SQLite persistence.
 
 [![CI](https://github.com/allbegray/nice-id-mock-server/actions/workflows/ci.yml/badge.svg)](https://github.com/allbegray/nice-id-mock-server/actions/workflows/ci.yml)
 [![Docker Pulls](https://img.shields.io/docker/pulls/allbegray/nice-id-mock-server)](https://hub.docker.com/r/allbegray/nice-id-mock-server)
@@ -66,8 +66,9 @@ docker compose up -d
 | `ITERATORS` | `66` | 결과 암호화 반복 횟수. 클라이언트 복호화와 같은 값이어야 한다 |
 | `STRICT_ONE_TIME_RESULT` | `false` | `true`면 `/auth/result` 성공 조회를 1회로 제한, 2회째는 `3033` |
 | `DB_PATH` | `data/niceid.db` | SQLite 파일 경로. `:memory:` 면 휘발성 인메모리 DB (영속화 없음). 상대 경로는 프로세스 cwd 기준 |
+| `LOG_LEVEL` | `info` | Fastify(pino) 로그 레벨. `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `silent` 중 하나. `silent` 면 로그 비활성화 |
 
-`CLIENT_ID`/`CLIENT_SECRET` 은 첫 부팅 때 빈 DB에 한 번만 심는 시드 값이다. 이후 토큰 발급 검사는 DB(`clients` 테이블)를 보므로, 실행 중 자격증명을 바꾸려면 서버를 재시작하는 게 아니라 Admin API(`POST /admin/clients`, `PUT /admin/clients/:clientId`)나 `/admin` 페이지를 쓴다. `src/config.ts` 의 `Config` 필드와 1:1로 대응한다 (`port`, `host`, `publicBaseUrl`, `clientId`, `clientSecret`, `strictCredentials`, `tokenTtlMs`, `authUrlTtlMs`, `iterators`, `strictOneTimeResult`, `dbPath`).
+`CLIENT_ID`/`CLIENT_SECRET` 은 첫 부팅 때 빈 DB에 한 번만 심는 시드 값이다. 이후 토큰 발급 검사는 DB(`clients` 테이블)를 보므로, 실행 중 자격증명을 바꾸려면 서버를 재시작하는 게 아니라 Admin API(`POST /admin/clients`, `PUT /admin/clients/:clientId`)나 `/admin` 페이지를 쓴다. `src/config.ts` 의 `Config` 필드와 1:1로 대응한다 (`port`, `host`, `publicBaseUrl`, `clientId`, `clientSecret`, `strictCredentials`, `tokenTtlMs`, `authUrlTtlMs`, `iterators`, `strictOneTimeResult`, `logLevel`, `dbPath`).
 
 주의: compose의 `ports` 는 `8899:8899` 고정이다. `PORT` 만 바꾸고 매핑을 그대로 두면 호스트에서 접속이 안 된다.
 
@@ -119,7 +120,7 @@ DI는 같은 입력에 `clientId`가 더해져 사이트마다 다르게 결정�
 
 - 이 mock은 로컬 개발용이다. 외부에 노출하지 않는다. 특히 관리 API(`/admin`, `/admin/clients*`)에는 인증이 전혀 없으므로, `8899` 포트를 외부에 열면 누구나 자격증명을 만들고 바꿀 수 있다. 로컬 루프백에서만 쓴다.
 - 실 NICE 자격증명(`client-id`, `client-secret`)과 실 NICE 엔드포인트를 여기에 넣지 않는다. 예시의 `test-client-id`, `test-client-secret`, `demo-client-01` 같은 더미만 쓴다.
-- `ci`, `di` 같은 개인식별정보를 로그에 남기지 않는다. 토큰 원문을 로그나 캡처에 붙여넣지 않는다 (확인할 땐 앞자리만 마스킹해서 본다).
+- 서버 로그에는 로컬 디버깅용으로 토큰·티켓·`transaction_id` 원문이 남는다 (`LOG_LEVEL=silent` 로 끌 수 있다). 로그를 외부에 공유할 때는 토큰 부분을 지운다.
 
 ## 라이선스
 

@@ -1,16 +1,17 @@
-FROM node:26-alpine AS deps
+FROM oven/bun:1.4.2-alpine AS deps
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+COPY package.json bun.lock ./
+RUN bun install --production --frozen-lockfile
 
-FROM node:26-alpine
+FROM oven/bun:1.4.2-alpine
 WORKDIR /app
-COPY --chown=node:node --from=deps /app/node_modules ./node_modules
-COPY --chown=node:node package.json ./
-COPY --chown=node:node src ./src
+# NOTE: the base image already ships a non-root `bun` user (uid 1000).
+COPY --chown=bun:bun --from=deps /app/node_modules ./node_modules
+COPY --chown=bun:bun package.json bun.lock ./
+COPY --chown=bun:bun src ./src
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=8899
-RUN mkdir -p /app/data && chown node:node /app/data
-USER node
+RUN mkdir -p /app/data && chown bun:bun /app/data
+USER bun
 EXPOSE 8899
 HEALTHCHECK --interval=10s --timeout=3s --retries=5 CMD wget -qO- http://127.0.0.1:${PORT:-8899}/health || exit 1
-CMD ["node", "src/server.ts"]
+CMD ["bun", "src/server.ts"]

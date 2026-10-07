@@ -120,13 +120,21 @@ export default async function routes(app: FastifyInstance): Promise<void> {
 
   // Unsupported Content-Type (415 / FST_ERR_CTP_INVALID_MEDIA_TYPE) maps to
   // 400 bad_request on admin routes.
-  app.setErrorHandler((error, _request, reply) => {
+  app.setErrorHandler((error, request, reply) => {
     const code = errorCodeOf(error);
     if (
       errorStatusOf(error) === 415 ||
       code === "FST_ERR_CTP_INVALID_MEDIA_TYPE" ||
       code === "FST_ERR_CTP_EMPTY_JSON_BODY"
     ) {
+      request.log.warn(
+        {
+          route: "admin",
+          reason: "unsupported_content_type",
+          content_type: request.headers["content-type"],
+        },
+        "관리 요청 거부",
+      );
       badRequest(reply, "unsupported content type or empty body");
       return;
     }
@@ -135,31 +143,58 @@ export default async function routes(app: FastifyInstance): Promise<void> {
 
   app.get("/admin/clients", async (_request, reply) => {
     const clients = listClients().map(toMasked);
+    _request.log.debug(
+      { route: "admin", action: "list_clients", count: clients.length },
+      "관리 요청 성공",
+    );
     return reply.code(200).send({ clients });
   });
 
   app.get("/admin", async (_request, reply) => {
     const html = await readAdminHtml();
     if (html === undefined) {
+      _request.log.warn(
+        { route: "admin", action: "view_page", reason: "template_missing" },
+        "관리 요청 실패",
+      );
       return reply
         .code(500)
         .type("text/html; charset=utf-8")
         .send("<h1>관리 페이지를 찾을 수 없습니다</h1>");
     }
+    _request.log.debug({ route: "admin", action: "view_page" }, "관리 요청 성공");
     return reply.type("text/html; charset=utf-8").send(html);
   });
 
   app.post("/admin/clients", async (request, reply) => {
     const body: unknown = request.body;
     if (!isRecord(body)) {
+      request.log.warn(
+        { route: "admin", action: "create_client", reason: "non_json_body" },
+        "관리 요청 거부",
+      );
       return badRequest(reply, "body must be a JSON object");
     }
     const clientId: unknown = body["clientId"];
     if (!isValidClientId(clientId)) {
+      request.log.warn(
+        { route: "admin", action: "create_client", reason: "invalid_client_id" },
+        "관리 요청 거부",
+      );
       return badRequest(reply, "clientId must match ^[A-Za-z0-9._-]{1,64}$");
     }
     const clientSecret: unknown = body["clientSecret"];
+    // The secret value is never logged — only whether it passed validation.
     if (!isValidClientSecret(clientSecret)) {
+      request.log.warn(
+        {
+          route: "admin",
+          action: "create_client",
+          reason: "invalid_client_secret",
+          client_id: clientId,
+        },
+        "관리 요청 거부",
+      );
       return badRequest(
         reply,
         "clientSecret must be 1..128 chars with no whitespace or control chars",
@@ -167,8 +202,16 @@ export default async function routes(app: FastifyInstance): Promise<void> {
     }
     const created = createClient(clientId, clientSecret);
     if (created === undefined) {
+      request.log.warn(
+        { route: "admin", action: "create_client", reason: "conflict", client_id: clientId },
+        "관리 요청 거부",
+      );
       return sendAdminError(reply, 409, "conflict", `client "${clientId}" already exists`);
     }
+    request.log.info(
+      { route: "admin", action: "create_client", client_id: created.clientId },
+      "클라이언트 생성",
+    );
     // Full secret is returned HERE ONLY, exactly once at creation.
     return reply.code(201).send({
       clientId: created.clientId,
@@ -181,26 +224,55 @@ export default async function routes(app: FastifyInstance): Promise<void> {
   app.get("/admin/clients/:clientId", async (request, reply) => {
     const clientId = paramClientId(request);
     if (!isValidClientId(clientId)) {
+      request.log.warn(
+        { route: "admin", action: "get_client", reason: "invalid_client_id" },
+        "관리 요청 거부",
+      );
       return badRequest(reply, "clientId must match ^[A-Za-z0-9._-]{1,64}$");
     }
     const found = findClient(clientId);
     if (found === undefined) {
+      request.log.warn(
+        { route: "admin", action: "get_client", reason: "not_found", client_id: clientId },
+        "관리 요청 거부",
+      );
       return notFound(reply, `client "${clientId}" not found`);
     }
+    request.log.debug(
+      { route: "admin", action: "get_client", client_id: clientId },
+      "관리 요청 성공",
+    );
     return reply.code(200).send(toMasked(found));
   });
 
   app.put("/admin/clients/:clientId", async (request, reply) => {
     const clientId = paramClientId(request);
     if (!isValidClientId(clientId)) {
+      request.log.warn(
+        { route: "admin", action: "rotate_secret", reason: "invalid_client_id" },
+        "관리 요청 거부",
+      );
       return badRequest(reply, "clientId must match ^[A-Za-z0-9._-]{1,64}$");
     }
     const body: unknown = request.body;
     if (!isRecord(body)) {
+      request.log.warn(
+        { route: "admin", action: "rotate_secret", reason: "non_json_body", client_id: clientId },
+        "관리 요청 거부",
+      );
       return badRequest(reply, "body must be a JSON object");
     }
     const clientSecret: unknown = body["clientSecret"];
     if (!isValidClientSecret(clientSecret)) {
+      request.log.warn(
+        {
+          route: "admin",
+          action: "rotate_secret",
+          reason: "invalid_client_secret",
+          client_id: clientId,
+        },
+        "관리 요청 거부",
+      );
       return badRequest(
         reply,
         "clientSecret must be 1..128 chars with no whitespace or control chars",
@@ -208,20 +280,40 @@ export default async function routes(app: FastifyInstance): Promise<void> {
     }
     const updated = updateClientSecret(clientId, clientSecret);
     if (updated === undefined) {
+      request.log.warn(
+        { route: "admin", action: "rotate_secret", reason: "not_found", client_id: clientId },
+        "관리 요청 거부",
+      );
       return notFound(reply, `client "${clientId}" not found`);
     }
+    request.log.info(
+      { route: "admin", action: "rotate_secret", client_id: clientId },
+      "시크릿 교체",
+    );
     return reply.code(200).send(toMasked(updated));
   });
 
   app.delete("/admin/clients/:clientId", async (request, reply) => {
     const clientId = paramClientId(request);
     if (!isValidClientId(clientId)) {
+      request.log.warn(
+        { route: "admin", action: "delete_client", reason: "invalid_client_id" },
+        "관리 요청 거부",
+      );
       return badRequest(reply, "clientId must match ^[A-Za-z0-9._-]{1,64}$");
     }
     const deleted = deleteClient(clientId);
     if (!deleted) {
+      request.log.warn(
+        { route: "admin", action: "delete_client", reason: "not_found", client_id: clientId },
+        "관리 요청 거부",
+      );
       return notFound(reply, `client "${clientId}" not found`);
     }
+    request.log.info(
+      { route: "admin", action: "delete_client", client_id: clientId },
+      "클라이언트 삭제",
+    );
     // 204 with EMPTY body. Already-issued tokens survive (see module doc).
     return reply.code(204).send();
   });

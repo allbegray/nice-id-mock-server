@@ -11,6 +11,9 @@ export interface Config {
   authUrlTtlMs: number;
   iterators: number;
   strictOneTimeResult: boolean;
+  // Pino log level for the Fastify logger. "silent" disables logging
+  // (tests force this so tap output stays readable).
+  logLevel: LogLevel;
   // SQLite file path. Relative paths resolve against process cwd.
   // ":memory:" selects an ephemeral in-memory database.
   dbPath: string;
@@ -39,6 +42,21 @@ function parseStringEnv(raw: string | undefined, fallback: string): string {
   return raw;
 }
 
+export const LOG_LEVELS = ["trace", "debug", "info", "warn", "error", "fatal", "silent"] as const;
+
+export type LogLevel = (typeof LOG_LEVELS)[number];
+
+function parseLogLevel(raw: string | undefined): LogLevel {
+  if (raw === undefined || raw === "") return "info";
+  const normalized = raw.trim().toLowerCase();
+  if ((LOG_LEVELS as readonly string[]).includes(normalized)) {
+    return normalized as LogLevel;
+  }
+  throw new Error(
+    `Invalid LOG_LEVEL=${JSON.stringify(raw)}: expected one of ${LOG_LEVELS.join(", ")}`,
+  );
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     port: parseNumberEnv("PORT", env["PORT"], 8899),
@@ -59,6 +77,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ),
     // Relative paths resolve against process cwd. ":memory:" = ephemeral DB.
     dbPath: parseStringEnv(env["DB_PATH"], "data/niceid.db"),
+    logLevel: parseLogLevel(env["LOG_LEVEL"]),
     defaultIdentity: {
       name: "홍길동",
       birthdate: "19000208",

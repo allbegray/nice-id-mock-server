@@ -292,9 +292,13 @@ export function purgeExpired(now: number = Date.now()): number {
   }
 }
 
-export function startPurgeTimer(intervalMs: number = 60_000): NodeJS.Timeout {
+export function startPurgeTimer(
+  intervalMs: number = 60_000,
+  onPurge?: (purged: number) => void,
+): NodeJS.Timeout {
   const timer = setInterval(() => {
-    purgeExpired();
+    const purged = purgeExpired();
+    if (purged > 0) onPurge?.(purged);
   }, intervalMs);
   timer.unref();
   return timer;

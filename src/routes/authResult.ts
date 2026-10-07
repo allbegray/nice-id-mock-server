@@ -67,13 +67,22 @@ export default async function routes(app: FastifyInstance): Promise<void> {
 
   // Anything the parsers reject outright (e.g. text/plain garbage with no
   // registered parser -> 415) is a non-JSON body -> 3001 (HTTP 200).
-  app.setErrorHandler((error, _request, reply) => {
+  app.setErrorHandler((error, request, reply) => {
     const code = errorCodeOf(error);
     if (
       errorStatusOf(error) === 415 ||
       code === "FST_ERR_CTP_INVALID_MEDIA_TYPE" ||
       code === "FST_ERR_CTP_EMPTY_JSON_BODY"
     ) {
+      request.log.warn(
+        {
+          route: "auth/result",
+          result_code: "3001",
+          reason: "unsupported_content_type",
+          content_type: request.headers["content-type"],
+        },
+        "인증 결과 조회 거부",
+      );
       reply.code(200).send(errorBody("3001"));
       return;
     }
@@ -85,13 +94,37 @@ export default async function routes(app: FastifyInstance): Promise<void> {
     // unknown token -> 400/1004; expired -> 400/1003.
     const token = extractBearer(request);
     if (token === undefined) {
+      request.log.warn(
+        { route: "auth/result", result_code: "1004", reason: "missing_bearer" },
+        "인증 결과 조회 거부",
+      );
       return sendError(reply, "1004");
     }
     const tokenSession = loadByAccessToken(token);
     if (tokenSession === undefined) {
+      request.log.warn(
+        {
+          route: "auth/result",
+          result_code: "1004",
+          reason: "unknown_token",
+          access_token: token,
+        },
+        "인증 결과 조회 거부",
+      );
       return sendError(reply, "1004");
     }
     if (isTokenExpired(tokenSession)) {
+      request.log.warn(
+        {
+          route: "auth/result",
+          result_code: "1003",
+          reason: "token_expired",
+          client_id: tokenSession.clientId,
+          request_no: tokenSession.requestNo,
+          access_token: token,
+        },
+        "인증 결과 조회 거부",
+      );
       return sendError(reply, "1003");
     }
 
@@ -102,6 +135,16 @@ export default async function routes(app: FastifyInstance): Promise<void> {
       !isRecord(rawBody) ||
       rawBody === (JSON_PARSE_FAILED as unknown as Record<string, unknown>)
     ) {
+      request.log.warn(
+        {
+          route: "auth/result",
+          result_code: "3001",
+          reason: "non_json_body",
+          client_id: tokenSession.clientId,
+          access_token: token,
+        },
+        "인증 결과 조회 거부",
+      );
       return reply.code(200).send(errorBody("3001"));
     }
     const body = rawBody as Partial<AuthResultBody> & Record<string, unknown>;
@@ -110,46 +153,127 @@ export default async function routes(app: FastifyInstance): Promise<void> {
     // 1002, well-formed-but-unknown IDs get 3029.
     const requestNo: unknown = body["request_no"];
     if (typeof requestNo !== "string" || requestNo.length < 20 || requestNo.length > 50) {
+      request.log.warn(
+        {
+          route: "auth/result",
+          result_code: "1002",
+          reason: "invalid_request_no",
+          client_id: tokenSession.clientId,
+          request_no: requestNo,
+          access_token: token,
+        },
+        "인증 결과 조회 거부",
+      );
       return sendError(reply, "1002");
     }
+    const baseRef = {
+      route: "auth/result" as const,
+      client_id: tokenSession.clientId,
+      request_no: requestNo,
+      access_token: token,
+    };
     const transactionId: unknown = body["transaction_id"];
     if (typeof transactionId !== "string" || transactionId === "") {
+      request.log.warn(
+        { ...baseRef, result_code: "1002", reason: "invalid_transaction_id" },
+        "인증 결과 조회 거부",
+      );
       return sendError(reply, "1002");
     }
     const webTransactionId: unknown = body["web_transaction_id"];
     if (typeof webTransactionId !== "string" || webTransactionId === "") {
+      request.log.warn(
+        { ...baseRef, result_code: "1002", reason: "invalid_web_transaction_id" },
+        "인증 결과 조회 거부",
+      );
       return sendError(reply, "1002");
     }
 
     // 4. Session lookup by request_no: token 발급 때 만든 값이 흐름 전체의 키다.
     const session = loadByRequestNo(requestNo);
     if (session === undefined) {
+      request.log.warn(
+        {
+          ...baseRef,
+          result_code: "3029",
+          reason: "unknown_request_no",
+          transaction_id: transactionId,
+        },
+        "인증 결과 조회 거부",
+      );
       return sendError(reply, "3029");
     }
     if (session.transactionId === undefined || transactionId !== session.transactionId) {
+      request.log.warn(
+        {
+          ...baseRef,
+          result_code: "3029",
+          reason: "transaction_mismatch",
+          transaction_id: transactionId,
+          expected_transaction_id: session.transactionId,
+        },
+        "인증 결과 조회 거부",
+      );
       return sendError(reply, "3029");
     }
+    const sessionRef = { ...baseRef, transaction_id: transactionId, status: session.status };
     if (isAuthWindowExpired(session)) {
+      request.log.warn(
+        { ...sessionRef, result_code: "3032", reason: "auth_window_expired" },
+        "인증 결과 조회 거부",
+      );
       return sendError(reply, "3032");
     }
     if (session.status === "FAILED") {
       const failCode: string = session.failCode ?? "3032";
+      request.log.warn(
+        {
+          ...sessionRef,
+          result_code: isErrorCode(failCode) ? failCode : "3032",
+          reason: "cert_failed",
+          fail_code: failCode,
+        },
+        "인증 결과 조회 거부",
+      );
       return sendError(reply, isErrorCode(failCode) ? failCode : "3032");
     }
     if (session.status !== "SUCCESS") {
+      request.log.warn(
+        { ...sessionRef, result_code: "3032", reason: "cert_incomplete" },
+        "인증 결과 조회 거부",
+      );
       return sendError(reply, "3032");
     }
     if (session.webTransactionId === undefined || webTransactionId !== session.webTransactionId) {
+      request.log.warn(
+        {
+          ...sessionRef,
+          result_code: "3032",
+          reason: "web_transaction_mismatch",
+          web_transaction_id: webTransactionId,
+          expected_web_transaction_id: session.webTransactionId,
+        },
+        "인증 결과 조회 거부",
+      );
       return sendError(reply, "3032");
     }
 
     const config = loadConfig();
     if (config.strictOneTimeResult && session.resultFetchedAt !== undefined) {
+      request.log.warn(
+        { ...sessionRef, result_code: "3033", reason: "already_fetched" },
+        "인증 결과 조회 거부",
+      );
       return sendError(reply, "3033");
     }
 
     // 5. Success: encrypt the exact result JSON; never emit plaintext.
+    // The log carries the correlation IDs; the ciphertext itself stays out.
     if (session.identity === undefined) {
+      request.log.warn(
+        { ...sessionRef, result_code: "3032", reason: "missing_identity" },
+        "인증 결과 조회 거부",
+      );
       return sendError(reply, "3032");
     }
     const json = JSON.stringify(
@@ -161,6 +285,10 @@ export default async function routes(app: FastifyInstance): Promise<void> {
       transactionId: session.transactionId,
     });
     updateSession(session.requestNo, { resultFetchedAt: Date.now() });
+    request.log.info(
+      { ...sessionRef, result_code: "0000", auth_method: session.authMethod ?? "M" },
+      "인증 결과 제공 성공",
+    );
 
     return reply.code(200).send({
       result_code: "0000",

@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
-import Fastify from "fastify";
+import Fastify, { LogController } from "fastify";
 import pkg from "../package.json" with { type: "json" };
 import type { Config } from "./config.ts";
 import { loadConfig } from "./config.ts";
@@ -54,7 +54,16 @@ const PROJECT_INFO = {
   },
 } as const;
 
-export function buildApp(configOverrides?: Partial<Config>): FastifyInstance {
+export interface BuildAppOptions {
+  // Pino destination for structured log lines. Used by tests to capture
+  // logs in-memory; production leaves it undefined (stdout).
+  logStream?: NodeJS.WritableStream;
+}
+
+export function buildApp(
+  configOverrides?: Partial<Config>,
+  appOptions?: BuildAppOptions,
+): FastifyInstance {
   const config = { ...loadConfig(), ...configOverrides };
   // Built once per app: the handler returns this same object every request.
   const projectInfo = {
@@ -62,7 +71,43 @@ export function buildApp(configOverrides?: Partial<Config>): FastifyInstance {
     defaultIdentity: { ...config.defaultIdentity },
   };
 
-  const app = Fastify({ bodyLimit: 1048576 });
+  // logLevel=silent disables the logger entirely (tests force this via
+  // LOG_LEVEL so tap output stays readable). A caller-supplied stream lets
+  // tests capture structured lines without touching stdout.
+  const logger =
+    config.logLevel === "silent" && appOptions?.logStream === undefined
+      ? false
+      : {
+          level: config.logLevel === "silent" ? "info" : config.logLevel,
+          ...(appOptions?.logStream === undefined ? {} : { stream: appOptions.logStream }),
+        };
+
+  // Default per-request "incoming request"/"request completed" lines are
+  // disabled (LogController, not the deprecated top-level flag); the
+  // onResponse hook below emits a single "요청 완료" line that also carries the
+  // duration, so each request costs exactly one access line plus the
+  // handler's own business line (both share the reqId).
+  const app = Fastify({
+    bodyLimit: 1048576,
+    logger,
+    logController: new LogController({ disableRequestLogging: true }),
+  });
+
+  // Single access line per request. /health stays at debug: the Docker
+  // HEALTHCHECK hits it every 10s and would otherwise drown real traffic.
+  app.addHook("onResponse", async (request, reply) => {
+    const fields = {
+      method: request.method,
+      url: request.url,
+      statusCode: reply.statusCode,
+      durationMs: Math.round(reply.elapsedTime * 10) / 10,
+    };
+    if (request.url === "/health" || request.url.startsWith("/health?")) {
+      request.log.debug(fields, "요청 완료");
+    } else {
+      request.log.info(fields, "요청 완료");
+    }
+  });
 
   app.addContentTypeParser(
     "application/x-www-form-urlencoded",

@@ -293,20 +293,39 @@ function resolveSession(certId: string): Session | undefined {
 
 export default async function routes(app: FastifyInstance): Promise<void> {
   app.get("/ido/cert/request/:certId", async (request, reply) => {
-    const session = resolveSession(certIdOf(request));
+    const certId = certIdOf(request);
+    const session = resolveSession(certId);
     if (session === undefined) {
+      request.log.warn(
+        { route: "cert", action: "view", cert_id: certId, reason: "unknown_or_expired" },
+        "인증창 없음",
+      );
       return reply.code(404).type("text/html; charset=utf-8").send(notFoundPage());
     }
+    const certRef = { route: "cert" as const, request_no: session.requestNo, cert_id: certId };
     const query = queryOf(request);
 
     const failCode = extractFailCode({}, query);
     if (failCode !== "" && isFailCode(failCode)) {
       const updated = updateSession(session.requestNo, { status: "FAILED", failCode });
+      request.log.info(
+        { ...certRef, action: "fail", status: "FAILED", fail_code: failCode },
+        "인증 실패 처리",
+      );
       return reply.type("text/html; charset=utf-8").send(failurePage(updated ?? session, failCode));
     }
 
     const resolved = resolveMethod(session, query["svc_type"]);
     if (resolved.error !== undefined) {
+      request.log.warn(
+        {
+          ...certRef,
+          action: "view",
+          reason: "invalid_svc_type",
+          svc_type: asTrimmed(query["svc_type"]),
+        },
+        "인증창 요청 거부",
+      );
       return sendForm(
         reply,
         session,
@@ -327,31 +346,53 @@ export default async function routes(app: FastifyInstance): Promise<void> {
         failCode: undefined,
       });
       if (updated === undefined) {
+        request.log.warn({ ...certRef, action: "auto", reason: "session_vanished" }, "인증창 없음");
         return reply.code(404).type("text/html; charset=utf-8").send(notFoundPage());
       }
+      request.log.info({ ...certRef, action: "auto", status: "SUCCESS", method }, "인증 완료");
       return deliverSuccess(reply, updated);
     }
 
+    request.log.debug({ ...certRef, action: "view", method }, "인증 폼 표시");
     return sendForm(reply, session, { ...defaultFormValues(), method });
   });
 
   app.post("/ido/cert/request/:certId/complete", async (request, reply) => {
-    const session = resolveSession(certIdOf(request));
+    const certId = certIdOf(request);
+    const session = resolveSession(certId);
     if (session === undefined) {
+      request.log.warn(
+        { route: "cert", action: "complete", cert_id: certId, reason: "unknown_or_expired" },
+        "인증창 없음",
+      );
       return reply.code(404).type("text/html; charset=utf-8").send(notFoundPage());
     }
+    const certRef = { route: "cert" as const, request_no: session.requestNo, cert_id: certId };
     const body = bodyOf(request);
     const query = queryOf(request);
 
     const failCode = extractFailCode(body, query);
     if (failCode !== "" && isFailCode(failCode)) {
       const updated = updateSession(session.requestNo, { status: "FAILED", failCode });
+      request.log.info(
+        { ...certRef, action: "fail", status: "FAILED", fail_code: failCode },
+        "인증 실패 처리",
+      );
       return reply.type("text/html; charset=utf-8").send(failurePage(updated ?? session, failCode));
     }
 
     let identity: Identity;
     const resolved = resolveMethod(session, body.svc_type ?? query["svc_type"]);
     if (resolved.error !== undefined) {
+      request.log.warn(
+        {
+          ...certRef,
+          action: "complete",
+          reason: "invalid_svc_type",
+          svc_type: asTrimmed(body.svc_type ?? query["svc_type"]),
+        },
+        "인증창 요청 거부",
+      );
       return sendForm(
         reply,
         session,
@@ -364,8 +405,12 @@ export default async function routes(app: FastifyInstance): Promise<void> {
     try {
       identity = validateIdentity(body, { requireMobile: method === "M" });
     } catch (err) {
-      const sticky = normalizeIdentity(body);
       const detail = err instanceof Error ? err.message : "입력값이 올바르지 않습니다";
+      request.log.warn(
+        { ...certRef, action: "complete", reason: "invalid_identity", detail, method },
+        "인증창 요청 거부",
+      );
+      const sticky = normalizeIdentity(body);
       const values: FormValues = {
         method,
         name: sticky.name,
@@ -388,18 +433,39 @@ export default async function routes(app: FastifyInstance): Promise<void> {
       failCode: undefined,
     });
     if (updated === undefined) {
+      request.log.warn(
+        { ...certRef, action: "complete", reason: "session_vanished" },
+        "인증창 없음",
+      );
       return reply.code(404).type("text/html; charset=utf-8").send(notFoundPage());
     }
+    request.log.info({ ...certRef, action: "complete", status: "SUCCESS", method }, "인증 완료");
     return deliverSuccess(reply, updated);
   });
 
   app.post("/ido/cert/request/:certId/cancel", async (request, reply) => {
-    const session = resolveSession(certIdOf(request));
+    const certId = certIdOf(request);
+    const session = resolveSession(certId);
     if (session === undefined) {
+      request.log.warn(
+        { route: "cert", action: "cancel", cert_id: certId, reason: "unknown_or_expired" },
+        "인증창 없음",
+      );
       return reply.code(404).type("text/html; charset=utf-8").send(notFoundPage());
     }
     const updated = updateSession(session.requestNo, { status: "CANCELLED" });
     const closeUrl = (updated ?? session).closeUrl;
+    request.log.info(
+      {
+        route: "cert",
+        action: "cancel",
+        request_no: session.requestNo,
+        cert_id: certId,
+        status: "CANCELLED",
+        redirected: closeUrl !== undefined && closeUrl !== "",
+      },
+      "인증 취소",
+    );
     if (closeUrl !== undefined && closeUrl !== "") {
       return reply.redirect(closeUrl);
     }

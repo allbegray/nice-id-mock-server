@@ -15,8 +15,8 @@
 //   MODE           "fail" selects failure mode (anything else = happy)
 //   FAIL_CODE      3029|3032, default 3032 (only read when MODE=fail)
 //
-// No dependencies beyond Node builtins. Never runs inside the mock
-// container: the JVM verifier spawns on THIS host (the node:26-alpine
+// No dependencies beyond Bun/Node builtins. Never runs inside the mock
+// container: the JVM verifier spawns on THIS host (the oven/bun:alpine
 // image has no JDK).
 
 import { spawnSync } from "node:child_process";

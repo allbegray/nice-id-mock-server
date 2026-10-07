@@ -45,13 +45,22 @@ export default async function routes(app: FastifyInstance): Promise<void> {
 
   // Anything the parsers reject outright (e.g. text/plain garbage with no
   // registered parser -> 415) is a non-JSON body -> 3001 (HTTP 200).
-  app.setErrorHandler((error, _request, reply) => {
+  app.setErrorHandler((error, request, reply) => {
     const code = errorCodeOf(error);
     if (
       errorStatusOf(error) === 415 ||
       code === "FST_ERR_CTP_INVALID_MEDIA_TYPE" ||
       code === "FST_ERR_CTP_EMPTY_JSON_BODY"
     ) {
+      request.log.warn(
+        {
+          route: "auth/token",
+          result_code: "3001",
+          reason: "unsupported_content_type",
+          content_type: request.headers["content-type"],
+        },
+        "토큰 발급 거부",
+      );
       reply.code(200).send(errorBody("3001"));
       return;
     }
@@ -62,12 +71,21 @@ export default async function routes(app: FastifyInstance): Promise<void> {
     const config = loadConfig();
 
     // 1. Authorization: Basic <base64url_nopad(clientId:clientSecret)>.
+    // The header VALUE is never logged (it decodes to clientSecret).
     const header = request.headers.authorization;
     if (header === undefined || !header.startsWith("Basic ")) {
+      request.log.warn(
+        { route: "auth/token", result_code: "1001", reason: "missing_authorization" },
+        "토큰 발급 거부",
+      );
       return sendError(reply, "1001");
     }
     const token = header.slice("Basic ".length).trim();
     if (token === "") {
+      request.log.warn(
+        { route: "auth/token", result_code: "1001", reason: "empty_credentials" },
+        "토큰 발급 거부",
+      );
       return sendError(reply, "1001");
     }
     let clientId: string;
@@ -78,20 +96,36 @@ export default async function routes(app: FastifyInstance): Promise<void> {
       const normalized = token.replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
       const raw = Buffer.from(normalized, "base64url");
       if (raw.length === 0 || raw.toString("base64url") !== normalized) {
+        request.log.warn(
+          { route: "auth/token", result_code: "1001", reason: "malformed_credentials" },
+          "토큰 발급 거부",
+        );
         return sendError(reply, "1001");
       }
       const decoded = raw.toString("utf8");
       const separator = decoded.indexOf(":");
       if (separator <= 0) {
+        request.log.warn(
+          { route: "auth/token", result_code: "1001", reason: "malformed_credentials" },
+          "토큰 발급 거부",
+        );
         return sendError(reply, "1001");
       }
       clientId = decoded.slice(0, separator);
       clientSecret = decoded.slice(separator + 1);
     } catch {
+      request.log.warn(
+        { route: "auth/token", result_code: "1001", reason: "malformed_credentials" },
+        "토큰 발급 거부",
+      );
       return sendError(reply, "1001");
     }
     // strict=false skips the DB lookup entirely (local-debug bypass).
     if (config.strictCredentials && !validateClientCredentials(clientId, clientSecret)) {
+      request.log.warn(
+        { route: "auth/token", result_code: "1006", reason: "unknown_client", client_id: clientId },
+        "토큰 발급 거부",
+      );
       return sendError(reply, "1006");
     }
 
@@ -99,24 +133,68 @@ export default async function routes(app: FastifyInstance): Promise<void> {
     // app.ts). Anything else -> 3001 (HTTP 200).
     const body: unknown = request.body;
     if (!isRecord(body) || body === (JSON_PARSE_FAILED as unknown as Record<string, unknown>)) {
+      request.log.warn(
+        {
+          route: "auth/token",
+          result_code: "3001",
+          reason: "non_json_body",
+          client_id: clientId,
+          content_type: request.headers["content-type"],
+        },
+        "토큰 발급 거부",
+      );
       return reply.code(200).send(errorBody("3001"));
     }
     if (body["grant_type"] !== "client_credentials") {
+      const grantType: unknown = body["grant_type"];
+      request.log.warn(
+        {
+          route: "auth/token",
+          result_code: "1002",
+          reason: "invalid_grant_type",
+          client_id: clientId,
+          grant_type: typeof grantType === "string" ? grantType : typeof grantType,
+        },
+        "토큰 발급 거부",
+      );
       return sendError(reply, "1002");
     }
     const requestNo: unknown = body["request_no"];
     if (typeof requestNo !== "string" || requestNo.length < 20 || requestNo.length > 50) {
+      request.log.warn(
+        {
+          route: "auth/token",
+          result_code: "1002",
+          reason: "invalid_request_no",
+          client_id: clientId,
+          request_no: requestNo,
+        },
+        "토큰 발급 거부",
+      );
       return sendError(reply, "1002");
     }
 
     // 3. Create/replace the session. A repeat call rotates ticket /
     // iterators / accessToken and invalidates the previous token
-    // (handled inside createSession).
+    // (handled inside createSession). Local mock: full values are logged
+    // as-is for curl-debugging (no masking).
     const session = createSession(requestNo, {
       tokenTtlMs: config.tokenTtlMs,
       iterators: config.iterators,
       clientId,
     });
+    request.log.info(
+      {
+        route: "auth/token",
+        result_code: "0000",
+        client_id: clientId,
+        request_no: requestNo,
+        access_token: session.accessToken,
+        ticket: session.ticket,
+        expires_in: session.tokenExpiresAt,
+      },
+      "토큰 발급 성공",
+    );
 
     return reply.code(200).send({
       result_code: "0000",

@@ -68,14 +68,18 @@ app.addHook("onClose", async () => {
   closeDb();
 });
 
-startPurgeTimer();
+startPurgeTimer(60_000, (purged) => {
+  app.log.info({ purged }, "만료 세션 정리");
+});
 
 let shuttingDown = false;
-function shutdown(): void {
+function shutdown(signal: string): void {
   if (shuttingDown) return;
   shuttingDown = true;
+  app.log.info({ signal }, "종료 신호 수신");
   void app.close().then(
     () => {
+      app.log.info("서버 종료");
       process.exit(0);
     },
     (err: unknown) => {
@@ -84,12 +88,33 @@ function shutdown(): void {
     },
   );
 }
-process.once("SIGTERM", shutdown);
-process.once("SIGINT", shutdown);
+process.once("SIGTERM", () => shutdown("SIGTERM"));
+process.once("SIGINT", () => shutdown("SIGINT"));
+
+process.once("unhandledRejection", (reason: unknown) => {
+  app.log.error({ err: reason }, "처리되지 않은 rejection");
+});
+process.once("uncaughtException", (err: unknown) => {
+  app.log.error({ err }, "처리되지 않은 예외");
+});
 
 try {
   await app.listen({ port: config.port, host: config.host });
-  console.log(`nice-id-mock-server listening on http://${config.host}:${config.port}`);
+  // Secrets (clientSecret) are deliberately excluded here.
+  app.log.info(
+    {
+      host: config.host,
+      port: config.port,
+      publicBaseUrl: config.publicBaseUrl,
+      dbPath: config.dbPath,
+      logLevel: config.logLevel,
+      strictCredentials: config.strictCredentials,
+      tokenTtlMs: config.tokenTtlMs,
+      authUrlTtlMs: config.authUrlTtlMs,
+      strictOneTimeResult: config.strictOneTimeResult,
+    },
+    `nice-id-mock-server listening on http://${config.host}:${config.port}`,
+  );
 } catch (err) {
   app.log.error(err);
   process.exit(1);

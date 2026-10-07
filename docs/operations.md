@@ -19,7 +19,7 @@ TTL은 재시작 후에도 그대로 적용된다. 만료된 접근 토큰으로
 
 ```bash
 # 만료된 세션만 지우기 (ms epoch 비교)
-sqlite3 data/niceid.db "DELETE FROM sessions WHERE token_expires_at < $(node -p 'Date.now()');"
+sqlite3 data/niceid.db "DELETE FROM sessions WHERE token_expires_at < $(bun -p 'Date.now()');"
 ```
 
 ```bash
@@ -27,7 +27,7 @@ sqlite3 data/niceid.db "DELETE FROM sessions WHERE token_expires_at < $(node -p 
 sqlite3 data/niceid.db "DELETE FROM sessions;"
 ```
 
-`sqlite3` 바이너리가 없으면 `npm` 스크립트나 Admin API로 같은 작업을 해도 된다. 핵심은 자동 정리가 없다는 점만 기억한다.
+`sqlite3` 바이너리가 없으면 `bun` 스크립트나 Admin API로 같은 작업을 해도 된다. 핵심은 자동 정리가 없다는 점만 기억한다.
 
 ## 초기화와 백업
 
@@ -53,6 +53,15 @@ cp data/niceid.db-shm /tmp/niceid-backup.db-shm 2>/dev/null || true
 |---|---|---|
 | 접근 토큰 | 24시간 (`TOKEN_TTL_MS`) | `/auth/url`, `/auth/result` 에서 HTTP 400 `1003` |
 | 인증창 (`auth_url`, `transaction_id`) | 10분 (`AUTH_URL_TTL_MS`) | 표준창 404 페이지, `/auth/result` 에서 HTTP 200 `3032` |
+
+## 로그
+
+`LOG_LEVEL` 로 조절한다 (기본값 `info`, `silent` 면 비활성화). Fastify 내장 pino 로거를 쓰므로 출력은 JSON 한 줄(newline-delimited)이다.
+
+- 요청마다 정확히 한 줄의 액세스 로그 (`요청 완료`: `method`, `url`, `statusCode`, `durationMs`). `/health` 는 Docker HEALTHCHECK(10초 간격)에 찍히므로 `debug` 로만 남는다.
+- 업무 로그는 같은 요청의 `reqId` 로 묶인다: 토큰 발급/거부(`토큰 발급 성공`/`토큰 발급 거부`), URL 발급(`인증 URL 발급 성공`), 결과 제공(`인증 결과 제공 성공`), 표준창 완료·실패·취소(`인증 완료`/`인증 실패 처리`/`인증 취소`), Admin 생성·수정·삭제. 거부 사유는 `result_code` + machine-readable `reason` (예: `unknown_client`, `request_no_mismatch`, `transaction_mismatch`) 으로 찍힌다.
+- 로컬 디버깅용이라 값은 원문 그대로 찍는다 (`request_no`, `access_token`, `ticket`, `transaction_id` 전체). `clientSecret` 원문과 `Authorization` 헤더 값은 로그에 남기지 않는다.
+- 만료 세션 정리 타이머가 지운 게 있으면 `만료 세션 정리` (`purged` 건수), 시작·종료 시 리슨 주소와 종료 시그널을 남긴다.
 
 ## 트러블슈팅
 

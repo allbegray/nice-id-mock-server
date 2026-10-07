@@ -21,7 +21,7 @@ TOKEN_RESP=$(curl -s -X POST http://localhost:8899/ido/intc/v1.0/auth/token \
   -H 'Content-Type: application/json' \
   -d "{\"grant_type\":\"client_credentials\",\"request_no\":\"$REQ\"}")
 echo "$TOKEN_RESP"
-ACCESS=$(printf '%s' "$TOKEN_RESP" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).access_token")
+ACCESS=$(printf '%s' "$TOKEN_RESP" | bun -p "JSON.parse(require('fs').readFileSync(0,'utf8')).access_token")
 echo "access_token=$ACCESS"
 ```
 
@@ -31,8 +31,8 @@ URL_RESP=$(curl -s -X POST http://localhost:8899/ido/intc/v1.0/auth/url \
   -H 'Content-Type: application/json' \
   -d "{\"request_no\":\"$REQ\",\"return_url\":\"http://localhost:8080/nice-id/return?requestNo=$REQ\",\"svc_types\":[\"M\"],\"method_type\":\"GET\"}")
 echo "$URL_RESP"
-AUTH_URL=$(printf '%s' "$URL_RESP" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).auth_url")
-TXID=$(printf '%s' "$URL_RESP" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).transaction_id")
+AUTH_URL=$(printf '%s' "$URL_RESP" | bun -p "JSON.parse(require('fs').readFileSync(0,'utf8')).auth_url")
+TXID=$(printf '%s' "$URL_RESP" | bun -p "JSON.parse(require('fs').readFileSync(0,'utf8')).transaction_id")
 echo "auth_url=$AUTH_URL"
 ```
 
@@ -58,8 +58,8 @@ IPIN=$(curl -s -X POST http://localhost:8899/ido/intc/v1.0/auth/url \
   -H "Authorization: Bearer $ACCESS" \
   -H 'Content-Type: application/json' \
   -d "{\"request_no\":\"$REQ\",\"return_url\":\"http://localhost:8080/nice-id/return?requestNo=$REQ\",\"svc_types\":[\"I\"],\"method_type\":\"GET\"}")
-IPIN_AUTH=$(printf '%s' "$IPIN" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).auth_url")
-IPIN_TX=$(printf '%s' "$IPIN" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).transaction_id")
+IPIN_AUTH=$(printf '%s' "$IPIN" | bun -p "JSON.parse(require('fs').readFileSync(0,'utf8')).auth_url")
+IPIN_TX=$(printf '%s' "$IPIN" | bun -p "JSON.parse(require('fs').readFileSync(0,'utf8')).transaction_id")
 IPIN_LOC=$(curl -s -o /dev/null -w '%{redirect_url}' "$IPIN_AUTH?auto=1")
 IPIN_WTID=${IPIN_LOC##*web_transaction_id=}
 curl -s -X POST http://localhost:8899/ido/intc/v1.0/auth/result \
@@ -76,12 +76,12 @@ TOKEN2=$(curl -s -X POST http://localhost:8899/ido/intc/v1.0/auth/token \
   -H "Authorization: Basic $CRED" \
   -H 'Content-Type: application/json' \
   -d "{\"grant_type\":\"client_credentials\",\"request_no\":\"$REQ2\"}")
-ACCESS2=$(printf '%s' "$TOKEN2" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).access_token")
+ACCESS2=$(printf '%s' "$TOKEN2" | bun -p "JSON.parse(require('fs').readFileSync(0,'utf8')).access_token")
 URL2=$(curl -s -X POST http://localhost:8899/ido/intc/v1.0/auth/url \
   -H "Authorization: Bearer $ACCESS2" \
   -H 'Content-Type: application/json' \
   -d "{\"request_no\":\"$REQ2\",\"return_url\":\"http://localhost:8080/nice-id/return?requestNo=$REQ2\",\"svc_types\":[\"M\"],\"method_type\":\"GET\"}")
-AUTH_URL2=$(printf '%s' "$URL2" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).auth_url")
+AUTH_URL2=$(printf '%s' "$URL2" | bun -p "JSON.parse(require('fs').readFileSync(0,'utf8')).auth_url")
 echo "auth_url2=$AUTH_URL2"
 curl -s "$AUTH_URL2?fail=3032" | grep -o '실패 코드: [0-9]*'
 CERT2=${AUTH_URL2##*/}

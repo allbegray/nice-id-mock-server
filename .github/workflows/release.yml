@@ -12,22 +12,21 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v7
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: '26'
-          cache: npm
+          bun-version: '1.4.2'
       - name: Assert tag matches package.json version
         run: |
           tag="${GITHUB_REF_NAME#v}"
-          pkg_version="$(node -p "require('./package.json').version")"
+          pkg_version="$(bun -p "require('./package.json').version")"
           if [ "$tag" != "$pkg_version" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $pkg_version — bump with: npm version $tag --no-git-tag-version"
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $pkg_version — set package.json version to $tag"
             exit 1
           fi
           echo "version gate ok: $GITHUB_REF_NAME == package.json $pkg_version"
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test
 
   publish:
     needs: test
