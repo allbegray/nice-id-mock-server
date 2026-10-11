@@ -1,9 +1,9 @@
-FROM oven/bun:1.4.2-alpine AS deps
+FROM oven/bun:1.4.3-alpine AS deps
 WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --production --frozen-lockfile
 
-FROM oven/bun:1.4.2-alpine
+FROM oven/bun:1.4.3-alpine
 WORKDIR /app
 # NOTE: the base image already ships a non-root `bun` user (uid 1000).
 COPY --chown=bun:bun --from=deps /app/node_modules ./node_modules
